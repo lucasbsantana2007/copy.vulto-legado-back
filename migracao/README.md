@@ -25,6 +25,7 @@ As tabelas originais da Vulto (`lojas`, `vendas`, `itens_venda`, `compras`, `pon
 ## Pastas
 
 - `migracao/entrada/` — planilhas que o time limpou à mão. **É aqui que se edita.**
+- `migracao/consultas.sql` — consultas prontas para ver os resultados no banco (pendências, faturamento por mês, passivo, estoque).
 - `migracao/registro_decisoes.md` — o registro de decisões, no formato do brief. Toda decisão nova entra aqui (as abas Decisões das planilhas geradas são lidas daqui).
 - `migracao/saida/` — o que os scripts geram para conferir no Excel (`clientes atualizado v2.xlsx`, `estoque_vulto_01-10-2026.xlsx`, `vendas_padronizadas.csv`, o log de cada valor alterado e o gráfico das faixas de valor de compra). Não edite aqui: é sobrescrito a cada rodada.
 
