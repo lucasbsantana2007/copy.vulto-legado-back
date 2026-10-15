@@ -16,3 +16,6 @@ dados_limpos_para_entrega4/
 gerar_dados.py
 conferir_numeros.py
 perguntas_banca.py
+
+# migração: o banco intermediário é recriado pelo carregar.py
+migracao/saida/vulto_padronizado.db

@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Valor das compras Vulto</title>
+<style>
+  :root {
+    color-scheme: light;
+    --surface: #fcfcfb;
+    --page: #f4f3f0;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #7a7974;
+    --grid: #e4e2dd;
+    --axis: #b9b7b0;
+    --series-1: #2a78d6;
+    --series-1-hover: #1c5cab;
+    --border: #e4e2dd;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --surface: #1a1a19;
+      --page: #111110;
+      --text-primary: #f0efec;
+      --text-secondary: #c3c2b7;
+      --text-muted: #96958c;
+      --grid: #2c2c2a;
+      --axis: #4a4945;
+      --series-1: #3987e5;
+      --series-1-hover: #6da7ec;
+      --border: #2c2c2a;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface: #1a1a19;
+    --page: #111110;
+    --text-primary: #f0efec;
+    --text-secondary: #c3c2b7;
+    --text-muted: #96958c;
+    --grid: #2c2c2a;
+    --axis: #4a4945;
+    --series-1: #3987e5;
+    --series-1-hover: #6da7ec;
+    --border: #2c2c2a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 16px; background: var(--page); color: var(--text-primary);
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 860px; margin: 0 auto; background: var(--surface); border: 1px solid var(--border);
+         border-radius: 12px; padding: 24px; }
+  h1 { font-size: 20px; margin: 0 0 4px; font-weight: 600; }
+  .sub { color: var(--text-secondary); margin: 0 0 20px; }
+  .filtros { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 20px; }
+  .filtros button {
+    font: inherit; padding: 6px 14px; border-radius: 999px; cursor: pointer;
+    border: 1px solid var(--border); background: transparent; color: var(--text-secondary);
+  }
+  .filtros button[aria-pressed="true"] { background: var(--text-primary); color: var(--surface); border-color: var(--text-primary); }
+  .grafico { position: relative; }
+  svg { display: block; width: 100%; height: auto; overflow: visible; }
+  .eixo text, .rotulo { fill: var(--text-secondary); font-size: 12px; }
+  .valor-topo { fill: var(--text-primary); font-size: 13px; font-weight: 600; }
+  .grade line { stroke: var(--grid); }
+  .base { stroke: var(--axis); }
+  .barra { fill: var(--series-1); }
+  .coluna:hover .barra, .coluna:focus .barra { fill: var(--series-1-hover); }
+  .coluna { cursor: default; outline: none; }
+  .tooltip {
+    position: absolute; pointer-events: none; opacity: 0; transition: opacity .12s;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 12px; box-shadow: 0 4px 16px rgba(0,0,0,.12); font-size: 13px; white-space: nowrap;
+  }
+  .tooltip b { display: block; margin-bottom: 2px; }
+  .tooltip span { color: var(--text-secondary); }
+  .cenarios { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin: 24px 0 8px; }
+  .cenario { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+  .cenario small { color: var(--text-secondary); display: block; }
+  .cenario strong { font-size: 24px; font-weight: 600; display: block; margin: 2px 0; }
+  .cenario span { color: var(--text-muted); font-size: 12px; }
+  details { margin-top: 20px; }
+  summary { cursor: pointer; color: var(--text-secondary); }
+  table { width: 100%; border-collapse: collapse; margin-top: 10px; font-variant-numeric: tabular-nums; }
+  th, td { padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: right; }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--text-secondary); font-weight: 500; }
+  .nota { color: var(--text-muted); font-size: 12px; margin-top: 16px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Quantas compras caem em cada faixa de valor</h1>
+  <p class="sub" id="sub"></p>
+
+  <div class="filtros" role="group" aria-label="Canal">
+    <button data-grupo="todos" aria-pressed="true">Todos os canais</button>
+    <button data-grupo="fisica" aria-pressed="false">Lojas físicas</button>
+    <button data-grupo="online" aria-pressed="false">Site + App</button>
+  </div>
+
+  <div class="grafico">
+    <svg id="svg" viewBox="0 0 800 340" role="img" aria-labelledby="sub"></svg>
+    <div class="tooltip" id="tip" role="status"></div>
+  </div>
+
+  <div class="cenarios" id="cenarios"></div>
+
+  <details>
+    <summary>Ver tabela</summary>
+    <table>
+      <thead><tr><th>Faixa (R$)</th><th>Compras</th><th>% das compras</th><th>Valor vendido</th></tr></thead>
+      <tbody id="tabela"></tbody>
+    </table>
+  </details>
+
+  <p class="nota">
+    Fonte: vendas da Vulto de jan/2025 a set/2026 (<code>vulto_padronizado.db</code>), sem canceladas, estornadas, chargeback,
+    aguardando pagamento, testes, devoluções e pedidos duplicados do app. Valor da compra = produtos depois do desconto, sem frete.
+    As faixas não têm a mesma largura: 301–500 cobre R$ 200 e 501+ é aberta.
+  </p>
+</main>
+
+<script>
+const DADOS = {"todos":{"n":17302,"mediana":291.19,"faixas":[{"faixa":"0–100","qtd":892,"pct":5.2,"valor":72591.52},{"faixa":"101–200","qtd":3710,"pct":21.4,"valor":557257.21},{"faixa":"201–300","qtd":4281,"pct":24.7,"valor":1086329.15},{"faixa":"301–500","qtd":4153,"pct":24.0,"valor":1619920.47},{"faixa":"501+","qtd":4266,"pct":24.7,"valor":3198296.79}]},"fisica":{"n":10511,"mediana":293.84,"faixas":[{"faixa":"0–100","qtd":549,"pct":5.2,"valor":45357.94},{"faixa":"101–200","qtd":2243,"pct":21.3,"valor":337384.07},{"faixa":"201–300","qtd":2602,"pct":24.8,"valor":662705.01},{"faixa":"301–500","qtd":2542,"pct":24.2,"valor":988423.25},{"faixa":"501+","qtd":2575,"pct":24.5,"valor":1925789.36}]},"online":{"n":6791,"mediana":289.9,"faixas":[{"faixa":"0–100","qtd":343,"pct":5.1,"valor":27233.58},{"faixa":"101–200","qtd":1467,"pct":21.6,"valor":219873.14},{"faixa":"201–300","qtd":1679,"pct":24.7,"valor":423624.14},{"faixa":"301–500","qtd":1611,"pct":23.7,"valor":631497.22},{"faixa":"501+","qtd":1691,"pct":24.9,"valor":1272507.43}]}};
+const NOMES = { todos: "todos os canais", fisica: "lojas físicas", online: "site + app" };
+const MINIMOS = [{ v: 100, a: 1 }, { v: 200, a: 2 }, { v: 300, a: 3 }, { v: 500, a: 4 }]; // a = 1ª faixa liberada
+
+const fmtInt = n => n.toLocaleString("pt-BR");
+const fmtPct = n => n.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "%";
+const fmtBRL = n => n.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
+
+const svg = document.getElementById("svg");
+const tip = document.getElementById("tip");
+const W = 800, H = 340, M = { t: 28, r: 8, b: 40, l: 48 };
+const NS = "http://www.w3.org/2000/svg";
+const el = (tag, attrs, pai) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); pai.appendChild(e); return e; };
+
+// barra com topo arredondado (4px) e base reta
+function caminhoBarra(x, y, w, h) {
+  const r = Math.min(4, h, w / 2);
+  return `M${x},${y + h}V${y + r}Q${x},${y} ${x + r},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}V${y + h}Z`;
+}
+
+function desenhar(grupo) {
+  const d = DADOS[grupo];
+  document.getElementById("sub").textContent =
+    `${fmtInt(d.n)} compras da Vulto (${NOMES[grupo]}), jan/2025 a set/2026 · mediana ${fmtBRL(d.mediana)}`;
+  svg.innerHTML = "";
+  const iw = W - M.l - M.r, ih = H - M.t - M.b;
+  const max = 30; // eixo fixo em 30% para comparar canais sem reescalar
+  const y = p => M.t + ih - (p / max) * ih;
+
+  const grade = el("g", { class: "grade eixo" }, svg);
+  for (let p = 0; p <= max; p += 10) {
+    el("line", { x1: M.l, x2: W - M.r, y1: y(p), y2: y(p) }, grade);
+    el("text", { x: M.l - 8, y: y(p) + 4, "text-anchor": "end" }, grade).textContent = p + "%";
+  }
+
+  const banda = iw / d.faixas.length, larg = Math.min(56, banda * 0.5);
+  d.faixas.forEach((f, i) => {
+    const cx = M.l + banda * i + banda / 2, x = cx - larg / 2, h = y(0) - y(f.pct);
+    const g = el("g", { class: "coluna", tabindex: 0, "aria-label": `R$ ${f.faixa}: ${fmtInt(f.qtd)} compras, ${fmtPct(f.pct)}` }, svg);
+    el("rect", { x: M.l + banda * i, y: M.t, width: banda, height: ih, fill: "transparent" }, g); // alvo de hover maior que a barra
+    el("path", { class: "barra", d: caminhoBarra(x, y(f.pct), larg, h) }, g);
+    el("text", { class: "valor-topo", x: cx, y: y(f.pct) - 8, "text-anchor": "middle" }, g).textContent = fmtPct(f.pct);
+    el("text", { class: "rotulo", x: cx, y: H - M.b + 20, "text-anchor": "middle" }, svg).textContent = "R$ " + f.faixa;
+
+    const mostrar = () => {
+      tip.innerHTML = `<b>R$ ${f.faixa}</b>${fmtInt(f.qtd)} compras · ${fmtPct(f.pct)}<br><span>${fmtBRL(f.valor)} vendidos</span>`;
+      const caixa = svg.getBoundingClientRect(), esc = caixa.width / W;
+      tip.style.opacity = 1;
+      const tx = Math.min(Math.max(cx * esc - tip.offsetWidth / 2, 0), caixa.width - tip.offsetWidth);
+      tip.style.left = tx + "px";
+      tip.style.top = Math.max(y(f.pct) * esc - tip.offsetHeight - 30, 0) + "px";
+    };
+    g.addEventListener("mouseenter", mostrar);
+    g.addEventListener("focus", mostrar);
+    g.addEventListener("mouseleave", () => tip.style.opacity = 0);
+    g.addEventListener("blur", () => tip.style.opacity = 0);
+  });
+  el("line", { class: "base", x1: M.l, x2: W - M.r, y1: y(0), y2: y(0) }, svg);
+
+  // cenários: com mínimo R$ X, quantas compras liberam o desconto
+  document.getElementById("cenarios").innerHTML = MINIMOS.map(m => {
+    const lib = d.faixas.slice(m.a);
+    const pct = lib.reduce((s, f) => s + f.qtd, 0) / d.n * 100;
+    return `<div class="cenario"><small>Mínimo de R$ ${m.v}</small><strong>${fmtPct(pct)}</strong><span>das compras liberam o desconto</span></div>`;
+  }).join("");
+
+  document.getElementById("tabela").innerHTML = d.faixas.map(f =>
+    `<tr><td>R$ ${f.faixa}</td><td>${fmtInt(f.qtd)}</td><td>${fmtPct(f.pct)}</td><td>${fmtBRL(f.valor)}</td></tr>`).join("") +
+    `<tr><td><b>Total</b></td><td><b>${fmtInt(d.n)}</b></td><td><b>100%</b></td><td><b>${fmtBRL(d.faixas.reduce((s, f) => s + f.valor, 0))}</b></td></tr>`;
+}
+
+document.querySelectorAll(".filtros button").forEach(b => b.addEventListener("click", () => {
+  document.querySelectorAll(".filtros button").forEach(o => o.setAttribute("aria-pressed", o === b));
+  desenhar(b.dataset.grupo);
+}));
+desenhar("todos");
+</script>
+</body>
+</html>
