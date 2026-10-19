@@ -25,7 +25,7 @@ import pandas as pd
 
 import caminhos
 
-sys.path.insert(0, os.path.join(caminhos.MIGRACAO, "padronizacao"))
+sys.path.append(os.path.join(caminhos.MIGRACAO, "padronizacao"))  # por último: os scripts do time têm prioridade
 import atendimento as padronizacao_arthur  # noqa: E402
 
 CLIENTES = os.path.join(caminhos.SAIDA, "clientes atualizado v2.xlsx")

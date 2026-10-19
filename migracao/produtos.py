@@ -31,7 +31,7 @@ import pandas as pd
 import caminhos
 from estoque_01_10 import canonico
 
-sys.path.insert(0, os.path.join(caminhos.MIGRACAO, "padronizacao"))
+sys.path.append(os.path.join(caminhos.MIGRACAO, "padronizacao"))  # por último: os scripts do time têm prioridade
 from comum import NOME_COR, ler_codigo_produto, tamanho_padrao  # noqa: E402
 
 CATALOGO = os.path.join(caminhos.ENTRADA, "novo-catalogo_vulto_2026_REVISADO_final (1).xlsx")

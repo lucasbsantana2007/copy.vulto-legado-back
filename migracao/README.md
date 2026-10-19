@@ -17,6 +17,16 @@ pip install -r requirements.txt
 python migracao/carregar.py
 ```
 
+## Os dois bancos
+
+- **`data/vulto.db`**: as tabelas originais da Vulto, intactas, mais as tabelas padronizadas (abaixo). É onde se
+  compara "sistema da Vulto × nosso número".
+- **`data/vulto_corrigido.db`**: o banco da Vulto **consertado**, com as mesmas 10 tabelas e colunas do original e os
+  dados corrigidos pelas decisões do time (decisão 46). Os três números saem direto dele, e o `banco_corrigido.py`
+  confere isso a cada rodada. É o banco que vai para a migração.
+
+Os dois são recriados pelo `carregar.py`: ninguém edita à mão.
+
 ## O que fica no `vulto.db`
 
 As tabelas originais da Vulto (`lojas`, `vendas`, `itens_venda`, `compras`, `pontos_mov`, `estoque`, `entradas_estoque`, `funcionarios`, `config`) **nunca mudam**: são o "sistema da Vulto" com que os nossos números são comparados. O `carregar.py` apaga e recria só as tabelas abaixo.

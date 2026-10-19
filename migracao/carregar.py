@@ -11,6 +11,7 @@
 6. estoque_historico.py  histórico dia a dia desde 01/01/2025, terminando no número oficial
 7. atendimentos.py       atendimentos (WhatsApp, Instagram, e-mail) ligados ao cliente e à venda
 8. validar.py            confere as tabelas antes de gravar no vulto.db (se algo estiver errado, para aqui)
+9. banco_corrigido.py    data/vulto_corrigido.db: o banco da Vulto com as mesmas tabelas do original, já corrigido
 
 Depois grava no vulto.db as tabelas abaixo (apagadas e recriadas a cada rodada). As tabelas originais da Vulto
 (lojas, vendas, itens_venda, compras, pontos_mov, estoque, entradas_estoque, funcionarios, config) nunca mudam:
@@ -29,6 +30,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import caminhos  # noqa: E402
 import atendimentos  # noqa: E402
+import banco_corrigido  # noqa: E402
 import clientes_pontos  # noqa: E402
 import estoque_01_10  # noqa: E402
 import estoque_historico  # noqa: E402
@@ -55,13 +57,13 @@ def aba(arquivo: str, nome: str, cabecalho: int = 0) -> pd.DataFrame:
 
 def main():
     os.makedirs(caminhos.SAIDA, exist_ok=True)
-    print("1/8 valores");  padroniza_valores.main(caminhos.VULTO_DB)  # noqa: E702
-    print("\n2/8 produtos");  produtos.main()  # noqa: E702
-    print("\n3/8 vendas");  padroniza_vendas.main()  # noqa: E702
-    print("\n4/8 clientes e pontos");  clientes_pontos.main()  # noqa: E702
-    print("\n5/8 estoque em 01/10");  estoque_01_10.main()  # noqa: E702
-    print("\n6/8 histórico do estoque");  estoque_historico.main()  # noqa: E702
-    print("\n7/8 atendimentos");  atendimentos.main()  # noqa: E702
+    print("1/9 valores");  padroniza_valores.main(caminhos.VULTO_DB)  # noqa: E702
+    print("\n2/9 produtos");  produtos.main()  # noqa: E702
+    print("\n3/9 vendas");  padroniza_vendas.main()  # noqa: E702
+    print("\n4/9 clientes e pontos");  clientes_pontos.main()  # noqa: E702
+    print("\n5/9 estoque em 01/10");  estoque_01_10.main()  # noqa: E702
+    print("\n6/9 histórico do estoque");  estoque_historico.main()  # noqa: E702
+    print("\n7/9 atendimentos");  atendimentos.main()  # noqa: E702
 
     padronizado = sqlite3.connect(caminhos.PADRONIZADO)
     decisoes = pd.DataFrame(registro.decisoes(1, 10**6), columns=[coluna(c) for c in registro.COLUNAS])
@@ -80,7 +82,7 @@ def main():
         "registro_decisoes": decisoes,
     }
     padronizado.close()
-    print("\n8/8 conferência")
+    print("\n8/9 conferência")
     validar.conferir(tabelas)
     assert not ORIGINAIS & set(tabelas), "nunca sobrescrever uma tabela original da Vulto"
 
@@ -96,6 +98,9 @@ def main():
     print(f"\nGravado em {caminhos.VULTO_DB}:")
     for nome, df in tabelas.items():
         print(f"  {nome:28} {len(df):6} linhas")
+
+    print("\n9/9 vulto_corrigido.db")
+    banco_corrigido.main()
 
 
 if __name__ == "__main__":
