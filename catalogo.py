@@ -1,5 +1,5 @@
 """
-Catálogo de produtos — decisões 6 a 13 do Registro de Decisões.
+Catálogo de produtos — decisões 6 a 13 e 68 do Registro de Decisões.
 
 Entrada : catalogo_vulto_2026_REVISADO_final.xlsx (abas VERAO 25, inverno25, Verão 26 [+ bloco Inverno 26],
           Atemporais; a aba de 2024 é usada só como referência de EAN e custo)
@@ -34,7 +34,6 @@ CABECALHOS = {chave(k): v for k, v in CABECALHOS.items()}
 VERMELHOS = {"FFFF0000", "FFC00000"}
 AMARELO = "FFFFFF00"
 MARGEM_MINIMA = 0.50                     # decisão 10
-DATA_APROVACAO = "15/10/2026"            # decisão 10
 TAMANHO_CD = {"XP": "PP", "PP": "PP", "S": "P", "L": "G", "XL": "GG", "UN": "U", "UNICO": "U", "TAM UNICO": "U"}
 
 # decisão 11 — categorias com mais de um fornecedor: fornecedor pelo tipo de peça no nome.
@@ -90,11 +89,13 @@ def ler_abas(caminho, reg):
             linhas.append(reg_linha)
     referencia_2024 = {}
     ws = wb["PLANILHA ANTIGA NAO USAR"]
-    for r in ws.iter_rows(min_row=3, values_only=True):
+    for n, r in enumerate(ws.iter_rows(min_row=3, values_only=True), start=3):
         p = ler_codigo_produto(r[0])
         if p and p[3]:
             sku = montar_sku(p[0], p[1], p[2], tamanho_padrao(p[3]))
-            referencia_2024[sku] = dict(preco=dinheiro(r[5]), custo=dinheiro(r[6]), ean=digitos(r[7]))
+            referencia_2024[sku] = dict(preco=dinheiro(r[5]), custo=dinheiro(r[6]), ean=digitos(r[7]), nome=_texto(r[1]),
+                                        codigo=_texto(r[0]), tam_original=p[3], linha=n, prefixo=p[0], numero=p[1],
+                                        cor=p[2], grupo=_texto(r[2]), cor_original=_texto(r[3]))
     return linhas, referencia_2024
 
 
@@ -255,8 +256,11 @@ def processar(pasta):
             reg.add(8, "Preço continua em revisão", f"{r['aba']}!{r['linha']}", "status", "Revisar preço",
                     "Revisar preço", "Preço diferente dos outros tamanhos")
 
-    # ---------------------------------------------------------------- decisão 10: margem mínima de 50%
+    # ---------------------------------------------------------------- decisão 10 (revisada): margem mínima de 50%
+    # A migração não muda preço de venda: a margem baixa vira alerta e o preço sugerido fica para Compras aprovar.
     df["margem"] = (df.preco - df.custo) / df.preco
+    df["margem_abaixo_minimo"] = "Não"
+    df["preco_sugerido_margem_50"] = None
     ativos = df[df.status == "Ativo"]
     for (col, mod), g in ativos.groupby(["colecao", "modelo"]):
         if g.custo.isna().all() or g.margem.min() >= MARGEM_MINIMA - 1e-9:
@@ -266,13 +270,12 @@ def processar(pasta):
         novo = round(max(novo, g.preco.max()), 2)
         for i in g.index:
             antigo = df.at[i, "preco"]
+            df.at[i, "margem_abaixo_minimo"] = "Sim"
             if antigo == novo:
                 continue
-            df.at[i, "preco"] = novo
-            df.at[i, "obs"] = juntar(df.at[i, "obs"], f"preço anterior R$ {antigo:.2f}, "
-                                                      f"aumento aprovado em {DATA_APROVACAO}")
-            reg.add(10, "Preço ajustado para margem mínima de 50%", f"{df.at[i, 'aba']}!{df.at[i, 'linha']}",
-                    "preco", antigo, novo, f"{mod} ({col}): +R$ {novo - antigo:.2f}")
+            df.at[i, "preco_sugerido_margem_50"] = novo
+            reg.add(10, "Margem abaixo de 50%: preço mantido, sugestão para Compras", f"{df.at[i, 'aba']}!{df.at[i, 'linha']}",
+                    "preco", antigo, antigo, f"{mod} ({col}): sugerido R$ {novo:.2f} (+R$ {novo - antigo:.2f}), não aplicado")
     df["margem"] = ((df.preco - df.custo) / df.preco).round(4)
 
     # ---------------------------------------------------------------- decisão 11: fornecedor
@@ -327,19 +330,149 @@ def processar(pasta):
     df["obs"] = [juntar(o, "confirmar cadastro no CD") if (g and "Provisório" in str(oc)) else o
                  for o, g, oc in zip(df.obs, df.codigo_cd_gerado, df.origem_codigo_cd)]
 
+    # ---------------------------------------------------------------- decisão 6 (revisada): custo médio ponderado
+    # Dois custos convivem: o último custo de nota (Compras, para precificar) fica em 'custo'; o custo médio
+    # ponderado das notas de entrada (Financeiro, para margem e estoque valorizado) vai para a Lorenzi.
+    medio = custo_medio_das_notas(pasta)
+    df["custo_medio"] = df.sku.map(lambda s: medio.get(s, (None, 0))[0])
+    df["origem_custo_medio"] = df.sku.map(lambda s: f"Média ponderada de {medio[s][1]} peças nas notas de entrada"
+                                          if s in medio else None)
+    atemp = (df.colecao == "Atemporais") & df.custo_medio.isna() & df.custo_original.notna()
+    df.loc[atemp, "custo_medio"] = df.loc[atemp, "custo_original"].map(dinheiro)
+    df.loc[atemp, "origem_custo_medio"] = "Coluna custo_medio da aba Atemporais"
+    resto = df.custo_medio.isna()
+    df.loc[resto, "custo_medio"] = df.loc[resto, "custo"]
+    df.loc[resto, "origem_custo_medio"] = "Sem nota com custo: igual ao último custo"
+    for _, r in df[~resto & ~atemp].iterrows():
+        if r["custo"] is not None and abs(r["custo_medio"] - r["custo"]) >= 0.01:
+            reg.add(6, "Custo médio ponderado (Financeiro) separado do último custo", f"{r['aba']}!{r['linha']}",
+                    "custo_medio", r["custo"], round(r["custo_medio"], 2), r["origem_custo_medio"])
+    df["custo_medio"] = df.custo_medio.astype(float).round(2)
+
     # ---------------------------------------------------------------- cadastro mestre (1 linha por SKU)
     df["ordem"] = df.colecao.map(ORDEM_COLECAO)
     mestre = (df.sort_values(["sku", "ordem"]).groupby("sku").tail(1)   # coleção mais nova; Atemporais (0) só se não houver
               .drop(columns=["ordem"]).sort_values(["modelo", "cor", "tamanho"]))
     df = df.drop(columns=["ordem"])
+    # decisão 68: peça em mais de uma coleção vale o MENOR preço (REGRAS_OPERACAO: "pra não dar problema com Procon";
+    # o arquivo do Diego diz que, em conflito com a planilha da Marina, vale ele)
+    vigentes = df[df.status != "Descontinuado"]
+    menor = vigentes.groupby("sku").preco.min().combine_first(df.groupby("sku").preco.min())
+    mestre["preco_colecao_mais_nova"] = mestre.preco
+    mestre["preco"] = mestre.sku.map(menor)
+    for _, r in mestre[mestre.preco < mestre.preco_colecao_mais_nova - 0.001].iterrows():
+        reg.add(68, "Peça em duas coleções: vale o menor preço", r["sku"], "preco", r["preco_colecao_mais_nova"],
+                r["preco"], f"{r['colecao']} cobrava R$ {r['preco_colecao_mais_nova']:.2f}")
+    mestre["margem"] = ((mestre.preco - mestre.custo_medio) / mestre.preco).round(4)
     colunas = ["colecao", "aba", "linha", "sku", "codigo_cd", "modelo", "nome", "categoria", "nome_cor", "tamanho",
-               "preco", "custo", "margem", "origem_custo", "ean", "origem_ean", "fornecedor", "origem_fornecedor",
+               "preco", "custo", "custo_medio", "margem", "margem_abaixo_minimo", "preco_sugerido_margem_50",
+               "origem_custo", "origem_custo_medio", "ean", "origem_ean", "fornecedor", "origem_fornecedor",
                "fornecedor_nas_notas", "fornecedor_confere_notas", "status", "obs", "origem_codigo_cd", "codigo_cd_gerado",
                "codigo_original", "categoria_original", "cor_original", "tam_original", "preco_original",
                "custo_original", "ean_original"]
+    # ---------------------------------------------------------------- decisão 70: peças de 2024 que ainda vendem
+    novos = pecas_2024(pasta, ref2024, set(mestre.sku), por_modelo, reg)
+    if len(novos):
+        mestre = pd.concat([mestre, novos], ignore_index=True).sort_values(["modelo", "cor", "tamanho"])
+        df = pd.concat([df, novos.drop(columns=["preco_colecao_mais_nova"])], ignore_index=True)
     listas = listas_de_referencia(por_modelo, por_categoria)
-    return dict(catalogo=df[colunas].sort_values(["colecao", "linha"]), mestre=mestre[colunas], listas=listas,
+    return dict(catalogo=df[colunas].sort_values(["colecao", "linha"]), mestre=mestre[colunas + ["preco_colecao_mais_nova"]],
+                listas=listas,
                 skus_2024=set(ref2024)), reg
+
+
+STATUS_2024 = "Coleção 2024 (só estoque)"
+
+
+def pecas_2024(pasta, ref2024, no_cadastro, por_modelo, reg):
+    """Decisão 70. A aba de 2024 diz 'NÃO USAR - PREÇOS 2024', mas o próprio sistema da Vulto avisa que 'a antiga tem
+    os SKUs de 2024 que ainda vendem, não tirar'. Entram no cadastro as peças de 2024 que aparecem em vendas,
+    estoque, entradas ou contagem desde 2025. Preço = último preço vendido no PDV/site (o da aba 2024 está
+    desatualizado); custo e EAN da aba 2024."""
+    from comum import data_vulto, sku_canonico
+    caminho = os.path.join(pasta, "vulto.db")
+    with sqlite3.connect(caminho) as c:
+        # só vendas pagas de verdade: pedidos de teste (R$ 1,00) e não pagos não são preço praticado
+        vendidos = pd.read_sql("""select i.sku, i.preco_unit, i.qtd, v.criado_em from itens_venda i
+                                  join vendas v on v.id = i.venda_id
+                                  where i.qtd > 0 and lower(trim(coalesce(v.status, ''))) in ('pago', 'aprovado', '')
+                                    and coalesce(v.pedido_externo, '') not like 'S99%'
+                                    and coalesce(v.pedido_externo, '') not like 'APP-99%'
+                                    and lower(coalesce(v.obs, '')) not like '%teste%'""", c)
+        usados = set()
+        for t in ("itens_venda", "estoque", "entradas_estoque"):
+            usados |= {sku_canonico(s) for (s,) in c.execute(f"select distinct sku from {t}")}
+    contagem = os.path.join(pasta, "contagem_inventario_set26.xlsx")
+    if os.path.exists(contagem):
+        for aba, col in (("PINHEIROS 20-09", None), ("Eldorado", "codigo"), ("batel", "sku"), ("CD - posicao WMS 28-09", "SKU")):
+            try:
+                tab = pd.read_excel(contagem, sheet_name=aba, header=2 if col is None else 0, dtype=str)
+                usados |= {sku_canonico(s) for s in tab[col or "SKU"].dropna()}
+            except (ValueError, KeyError):
+                pass
+    vendidos["sku"] = vendidos.sku.map(sku_canonico)
+    vendidos["quando"] = vendidos.criado_em.map(data_vulto)
+    vendidos["preco"] = vendidos.preco_unit.map(dinheiro)
+    vendidos = vendidos.dropna(subset=["sku", "quando", "preco"])
+    ref = vendidos.sku.map(lambda k: (ref2024.get(k) or {}).get("preco"))
+    centavos = ref.notna() & (vendidos.preco > 20 * ref)                       # venda do app gravada em centavos
+    vendidos.loc[centavos, "preco"] = vendidos.loc[centavos, "preco"] / 100
+    plausivel = ref.isna() | (vendidos.preco >= 0.3 * ref)                     # descarta preço absurdo
+    ultimo = vendidos[plausivel].sort_values("quando").groupby("sku").last()
+    medio = custo_medio_das_notas(pasta)
+    linhas = []
+    for sku, r in ref2024.items():
+        if sku in no_cadastro or sku not in usados:
+            continue
+        preco, origem_preco = r["preco"], "Aba 2024 (nunca vendida desde 2025)"
+        if sku in ultimo.index:
+            u = ultimo.loc[sku]
+            preco = u.preco
+            origem_preco = f"Último preço vendido ({u.quando:%d/%m/%Y})"
+        tam = tamanho_padrao(r["tam_original"])
+        t_up = str(r["tam_original"]).upper()
+        modelo = f"{r['prefixo']}-{r['numero']}"
+        linhas.append(dict(
+            colecao="2024", aba="PLANILHA ANTIGA NAO USAR", linha=r["linha"], sku=sku,
+            codigo_cd=montar_codigo_cd(r["prefixo"], r["numero"], r["cor"], t_up if t_up.isdigit() else TAMANHO_CD.get(t_up, tam)),
+            modelo=modelo, nome=nome_proprio_peca(r["nome"]), categoria=CATEGORIA_POR_PREFIXO[r["prefixo"]],
+            nome_cor=NOME_COR[r["cor"]], tamanho=tam, preco=round(preco, 2), custo=r["custo"],
+            custo_medio=round(medio[sku][0], 2) if sku in medio else r["custo"],
+            margem=round((preco - (medio[sku][0] if sku in medio else r["custo"] or 0)) / preco, 4) if preco else None,
+            margem_abaixo_minimo="Não", preco_sugerido_margem_50=None, origem_custo="Aba 2024",
+            origem_custo_medio=(f"Média ponderada de {medio[sku][1]} peças nas notas de entrada" if sku in medio
+                                else "Aba 2024"),
+            ean=r["ean"] if ean_valido(r["ean"]) else None, origem_ean="Aba 2024" if ean_valido(r["ean"]) else None,
+            fornecedor=por_modelo.get(modelo), origem_fornecedor="Mesmo modelo" if modelo in por_modelo else None,
+            fornecedor_nas_notas=None, fornecedor_confere_notas=None, status=STATUS_2024, obs=origem_preco,
+            origem_codigo_cd="Gerado pelo padrão", codigo_cd_gerado=True, codigo_original=r["codigo"],
+            categoria_original=r["grupo"], cor_original=r["cor_original"], tam_original=r["tam_original"],
+            preco_original=r["preco"], custo_original=r["custo"], ean_original=r["ean"],
+            preco_colecao_mais_nova=round(preco, 2)))
+        reg.add(70, "Peça de 2024 que ainda vende incluída no cadastro", f"PLANILHA ANTIGA NAO USAR!{r['linha']}", "sku",
+                None, sku, f"Preço R$ {preco:.2f}: {origem_preco}; preço da aba 2024 R$ {r['preco'] or 0:.2f}")
+    return pd.DataFrame(linhas)
+
+
+def nome_proprio_peca(nome):
+    """'MOLETOM CARECA ESTONADO' -> 'Moletom Careca Estonado' (igual às abas novas)."""
+    from comum import nome_proprio
+    return nome_proprio(nome)
+
+
+def custo_medio_das_notas(pasta):
+    """Custo médio ponderado por SKU: soma(qtd × custo) / soma(qtd) das notas de entrada que têm custo."""
+    caminho = os.path.join(pasta, "vulto.db")
+    if not os.path.exists(caminho):
+        return {}
+    with sqlite3.connect(caminho) as c:
+        e = pd.read_sql("select sku, qtd, custo_unit from entradas_estoque where qtd > 0 and custo_unit <> ''", c)
+    from comum import sku_canonico
+    e["sku"] = e.sku.map(sku_canonico)
+    e["custo"] = e.custo_unit.map(dinheiro)
+    e = e.dropna(subset=["sku", "custo"])
+    g = e.assign(total=e.qtd * e.custo).groupby("sku").agg(total=("total", "sum"), pecas=("qtd", "sum"))
+    return {s: (r.total / r.pecas, int(r.pecas)) for s, r in g.iterrows()}
 
 
 def codigos_em_uso(pasta):

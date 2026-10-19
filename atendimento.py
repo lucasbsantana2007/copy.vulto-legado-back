@@ -1,5 +1,5 @@
 """
-Atendimento (export WhatsApp / Instagram / e-mail) — decisões 21 a 27 do Registro de Decisões.
+Atendimento (export WhatsApp / Instagram / e-mail) — decisões 21 a 27 e 67 do Registro de Decisões.
 
 Entrada : atendimentos_export_whatsapp_insta.csv (latin-1, separador ';', primeira linha 'sep=')
           vulto.db (opcional: só para conferir se o número do pedido existe)
@@ -9,7 +9,7 @@ import os
 import re
 import sqlite3
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -110,9 +110,13 @@ def pedido(v, msg, existentes, reg, id_):
     limpo = formato_pedido(re.sub(r"(?i)^(#|pedido\s*(?:n[ºo°]?)?\s*#?)", "", bruto).strip())
     if existentes is not None and limpo not in existentes:
         invertido = formato_pedido(digitos(limpo)[::-1])
-        if invertido in existentes:
+        # decisão 25 (revisada): só vale para pedido do site/app. Número de venda de loja vai de 1 a ~18.600, então
+        # quase qualquer número invertido 'existe' e a correção seria um chute.
+        if invertido in existentes and invertido[0] in "SA":
             reg.add(25, "Pedido com dígitos invertidos", id_, "pedido", bruto, invertido)
             return invertido
+        if invertido in existentes:
+            reg.add(25, "Inversão não aplicada (número de loja: não dá para confirmar)", id_, "pedido", bruto, limpo)
     if recuperado:
         reg.add(25, "Pedido recuperado do texto da mensagem", id_, "pedido", None, limpo)
     elif limpo != bruto:
@@ -209,6 +213,51 @@ def processar(pasta):
         final.append(n)
     out["nome"] = final
     return dict(atendimentos=out.sort_values("id")), reg
+
+
+def ligar_clientes(atendimentos, clientes, vendas, reg):
+    """Decisão 67: cada atendimento ligado ao cliente e ao pedido certo (pedido da Gerente de Atendimento).
+
+    Quem está falando é identificado pelo contato (e-mail ou celular do cadastro). Se o contato não identifica
+    (ex.: @ do Instagram), usa o cliente do pedido citado. O pedido só é ligado se existir e, quando os dois lados
+    têm cliente, se for do mesmo cliente e anterior ao atendimento."""
+    a = atendimentos.copy()
+    por_email = dict(zip(clientes.email.dropna(), clientes.loc[clientes.email.notna(), "cpf"]))
+    tel = clientes.dropna(subset=["telefone"]).drop_duplicates("telefone", keep=False)
+    por_tel = dict(zip(tel.telefone, tel.cpf))
+    v = vendas.assign(chave_pedido=vendas.pedido_externo.fillna(vendas.id.astype(str)))
+    v = v.drop_duplicates("chave_pedido", keep="first").set_index("chave_pedido")
+    cpfs, como, venda_ids, confere, lojas = [], [], [], [], []
+    for r in a.itertuples():
+        quando = datetime.strptime(r.data_hora, "%d/%m/%Y %H:%M:%S")
+        pelo_contato = por_email.get(r.contato) if "@" in str(r.contato) and not str(r.contato).startswith("@") \
+            else por_tel.get(r.contato)
+        tem_pedido = not vazio(r.pedido)
+        venda = v.loc[r.pedido] if (tem_pedido and r.pedido in v.index) else None
+        pelo_pedido = venda.cliente_cpf if venda is not None and not pd.isna(venda.cliente_cpf) else None
+        cpf = pelo_contato or pelo_pedido
+        como.append("E-mail/celular do cadastro" if pelo_contato else ("Cliente do pedido" if pelo_pedido else None))
+        if venda is None:
+            ok = "Pedido não encontrado" if tem_pedido else None
+        elif venda.data_hora > quando + timedelta(days=1):
+            ok = "Não (pedido depois do atendimento)"
+        elif pelo_contato and pelo_pedido and pelo_contato != pelo_pedido:
+            ok = "Não (pedido de outro cliente)"
+        elif pelo_contato and pelo_pedido:
+            ok = "Sim"
+        else:
+            ok = "Não verificável (falta cliente num dos lados)"
+        cpfs.append(cpf)
+        confere.append(ok)
+        venda_ids.append(venda.id if venda is not None and not str(ok).startswith("Não (") else None)
+        lojas.append(int(venda.loja_id) if venda is not None else 5)   # sem pedido: SAC central (loja do site)
+        reg.add(67, "Atendimento ligado ao cliente" if cpf else "Atendimento sem cliente identificado", r.id,
+                "cliente", r.contato, cpf, como[-1] or "contato não está no cadastro e não há pedido")
+        if ok and ok.startswith("Não ("):
+            reg.add(67, "Pedido citado não confere: não ligado", r.id, "pedido", r.pedido, None, ok)
+    a["cliente_cpf"], a["cliente_identificado_por"], a["venda_id"] = cpfs, como, venda_ids
+    a["pedido_confere"], a["loja_id"] = confere, lojas
+    return a
 
 
 def classificar_assunto(assunto, tags, mensagem):

@@ -1,20 +1,22 @@
 """
-Clientes e fidelidade (Vulto+) — decisões 1 a 5 do Registro de Decisões.
+Clientes e fidelidade (Vulto+) — decisões 1 a 5, 64, 65, 66 e 69 do Registro de Decisões.
 
 Entrada : clientes_fidelidade_FINAL_v3 (1).xlsx, aba Clientes
 Saída   : clientes_corrigidos.xlsx (Clientes, Alertas por e-mail, Ocorrências, Resumo)
+
+A coluna Pontos da planilha foi congelada em 01/01/2025 (aba LEIA ISSO). Ela entra como saldo inicial no extrato
+do Vulto+ (pontos.py); o saldo e a categoria de 01/10/2026 vêm de lá (função completar).
 """
 import re
 from datetime import datetime, timedelta
 
 import pandas as pd
 
-from comum import Registro, chave, cpf_valido, digitos, dinheiro, nome_proprio, telefone_padrao, vazio
+from comum import LOJAS, Registro, chave, cpf_valido, digitos, dinheiro, nome_proprio, telefone_padrao, vazio
 
 ARQUIVO = "clientes_fidelidade_FINAL_v3 (1).xlsx"
 
-# decisão 4 — faixas de pontos
-FAIXAS = [(0, 0, "Nada"), (1, 1500, "Bronze"), (1501, 5000, "Prata"), (5001, 10000, "Ouro"), (10001, None, "VIP")]
+# decisão 4 (revisada): a categoria segue a regra escrita na aba LEIA ISSO, calculada em pontos.py
 CATEGORIA_TEXTO = {
     "bronze": "Bronze", "brz": "Bronze",
     "silver": "Prata", "prata": "Prata", "prata*": "Prata",
@@ -28,10 +30,11 @@ MESES = {"jan": 1, "fev": 2, "mar": 3, "abr": 4, "mai": 5, "jun": 6, "jul": 7, "
          "nov": 11, "dez": 12}
 
 
-def categoria_por_pontos(p):
-    for ini, fim, nome in FAIXAS:
-        if p >= ini and (fim is None or p <= fim):
-            return nome
+# decisão 65 — consentimento para mensagens (LGPD: marketing só com 'sim' explícito)
+CONSENTIMENTO = {"x": "Sim", "sim": "Sim", "1": "Sim", "s": "Sim", "nao": "Não", "n": "Não", "0": "Não"}
+# decisão 69 — loja de cadastro escrita de 10 jeitos ('bh' = Savassi, 'cwb' = Batel)
+LOJA_CADASTRO = {"app": 6, "site": 5, "ecommerce": 5, "pinheiros": 1, "eldorado": 2, "eldorado shop": 2,
+                 "savassi": 3, "bh": 3, "batel": 4, "cwb": 4}
 
 
 def pontos(v):
@@ -161,26 +164,82 @@ def processar(pasta):
                             mensagem="Seus cadastros Vulto+ com o mesmo CPF foram unificados e os pontos somados."))
     out = pd.DataFrame(manter)
 
-    # ---------- decisão 4: categoria pela faixa de pontos (depois de somar os duplicados)
-    out["categoria"] = out["pontos"].apply(categoria_por_pontos)
+    # ---------- decisão 64: o mesmo e-mail em cadastros de pessoas diferentes
+    for e, g in out[out.email.notna()].groupby("email"):
+        if len(g) < 2:
+            continue
+        local = set(re.split(r"[._\-\d]+", e.split("@")[0])) - {""}
+        pontuacao = {}
+        for i, r in g.iterrows():                                   # primeiro nome no e-mail vale mais
+            partes = chave(r["nome"]).split(" ")
+            pontuacao[i] = 2 * (partes[0] in local) + len(local & set(partes[1:]))
+        melhor = max(pontuacao.values())
+        donos = [i for i, p in pontuacao.items() if p == melhor and p > 0]
+        dono = donos[0] if len(donos) == 1 else None
+        for i, r in g.iterrows():
+            if i == dono:
+                reg.add(64, "E-mail compartilhado: fica com quem tem o nome no e-mail", r["linha_planilha"], "e-mail",
+                        e, e, f"{len(g)} cadastros usavam este e-mail")
+                continue
+            out.at[i, "email"] = None
+            out.at[i, "problemas"] = r["problemas"] + ["E-mail era de outra pessoa (removido)"]
+            reg.add(64, "E-mail de outra pessoa removido do cadastro", r["linha_planilha"], "e-mail", e, None,
+                    "Mandar mensagem de um cliente para o e-mail de outro é vazamento de dado (LGPD)"
+                    if dono is not None else "Não dá para saber de quem é o e-mail: removido de todos")
+
+    # ---------- decisão 65: consentimento; decisão 69: loja de cadastro
+    out["aceita_mensagens"] = out.aceita_msg.map(lambda x: CONSENTIMENTO.get(chave(x), "Não informado"))
     for _, r in out.iterrows():
-        if r["categoria_planilha"] and r["categoria_planilha"] != r["categoria"]:
-            reg.add(4, "Categoria diferente da faixa de pontos", r["linha_planilha"], "categoria",
-                    r["categoria_original"], r["categoria"], f"{r['pontos']} pontos")
-        elif not vazio(r["categoria_original"]) and r["categoria_original"] != r["categoria"]:
-            reg.add(4, "Categoria padronizada", r["linha_planilha"], "categoria", r["categoria_original"],
-                    r["categoria"])
-        elif vazio(r["categoria_original"]):
-            reg.add(4, "Categoria em branco preenchida", r["linha_planilha"], "categoria", None, r["categoria"])
+        if vazio(r["aceita_msg"]):
+            reg.add(65, "Consentimento em branco: tratado como não", r["linha_planilha"], "aceita_msg", None,
+                    "Não informado", "Sem 'sim' explícito não entra em campanha (LGPD)")
+        elif str(r["aceita_msg"]) not in ("Sim", "Não"):
+            reg.add(65, "Consentimento padronizado", r["linha_planilha"], "aceita_msg", r["aceita_msg"],
+                    r["aceita_mensagens"])
+    out["loja_cadastro_id"] = out.loja_cadastro.map(lambda x: LOJA_CADASTRO.get(chave(x)))
+    for _, r in out.iterrows():
+        nome = LOJAS.get(r["loja_cadastro_id"])
+        if nome and chave(r["loja_cadastro"]) != chave(nome):
+            reg.add(69, "Loja de cadastro padronizada", r["linha_planilha"], "loja_cadastro", r["loja_cadastro"], nome)
 
     # ---------- 'Dados válidos' (Sim/Não) — se Não, a loja entra em contato com o cliente
     out["dados_validos"] = out["problemas"].apply(lambda p: "Não" if p else "Sim")
     out["motivo"] = out["problemas"].apply(lambda p: "; ".join(p) if p else None)
-    colunas = ["linha_planilha", "nome", "cpf", "email", "telefone", "data_cadastro", "pontos", "categoria",
+    colunas = ["linha_planilha", "nome", "cpf", "email", "telefone", "data_cadastro", "pontos",
                "dados_validos", "motivo", "unificado", "linhas_unificadas", "categoria_planilha", "obs",
-               "aceita_msg", "loja_cadastro", "cpf_original", "email_original", "telefone_original",
-               "data_cadastro_original", "pontos_original", "categoria_original"]
+               "aceita_mensagens", "loja_cadastro_id", "cpf_original", "email_original", "telefone_original",
+               "data_cadastro_original", "pontos_original", "categoria_original", "aceita_msg", "loja_cadastro"]
     return dict(clientes=out[colunas].sort_values("linha_planilha"), alertas=pd.DataFrame(alertas)), reg
+
+
+def completar(clientes, saldos, vendas, reg):
+    """Junta o saldo e a categoria de 01/10/2026 (pontos.py) e cria os clientes que só existem no sistema."""
+    s = saldos.set_index("cpf")
+    out = clientes.rename(columns={"pontos": "pontos_planilha_01jan2025"}).copy()
+    out["origem_cadastro"] = "Planilha Vulto+"
+    # ---------- decisão 66: CPF com pontos ou compras no sistema, mas sem linha na planilha
+    novos = sorted((set(s.index) | set(vendas.cliente_cpf.dropna())) - set(out.cpf))
+    loja_compra = vendas.dropna(subset=["cliente_cpf"]).sort_values("data_hora").groupby("cliente_cpf").loja_id.first()
+    extra = pd.DataFrame(dict(cpf=novos, origem_cadastro="Só no sistema (sem cadastro na planilha)",
+                              pontos_planilha_01jan2025=0, aceita_mensagens="Não informado",
+                              loja_cadastro_id=[loja_compra.get(c) for c in novos],
+                              dados_validos="Não", motivo="Cadastro só no sistema: sem nome, e-mail e telefone"))
+    for c in novos:
+        reg.add(66, "Cliente que só existia no sistema", c, "cpf", None, c,
+                "Cadastrado depois de 01/01/2025, quando a planilha foi congelada")
+    out = pd.concat([out, extra], ignore_index=True)
+    out["dados_validos"] = [("Não" if not cpf_valido(c) else d) for c, d in zip(out.cpf, out.dados_validos)]
+    # ---------- decisão 4 (revisada): categoria pela regra escrita, saldo em 01/10/2026
+    out["categoria"] = out.cpf.map(s.categoria).fillna("Bronze")
+    for col in ("acumulado_12m", "saldo_sem_vencimento", "vencidos", "saldo", "valor_reais", "saldo_sistema"):
+        out[col] = out.cpf.map(s[col]).fillna(0)
+    out = out.rename(columns={"saldo": "saldo_pontos_01out2026", "valor_reais": "saldo_reais_01out2026",
+                              "saldo_sistema": "saldo_no_sistema_vulto", "acumulado_12m": "pontos_ganhos_12m"})
+    for _, r in out[out.origem_cadastro == "Planilha Vulto+"].iterrows():
+        if r["categoria_planilha"] != r["categoria"]:
+            reg.add(4, "Categoria pela regra escrita (pontos ganhos em 12 meses)", r["linha_planilha"], "categoria",
+                    r["categoria_original"], r["categoria"], f"{int(r['pontos_ganhos_12m'])} pontos ganhos em 12 meses")
+    return out
 
 
 if __name__ == "__main__":

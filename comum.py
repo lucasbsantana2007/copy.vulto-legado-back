@@ -2,9 +2,19 @@
 import math
 import re
 import unicodedata
+from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from zoneinfo import ZoneInfo
 
 import pandas as pd
+
+FUSO = ZoneInfo("America/Sao_Paulo")
+DATA_CORTE = datetime(2026, 10, 1)              # posição pedida pela diretoria: 01/10/2026, 00:00 (horário de Brasília)
+INICIO_PERIODO = datetime(2025, 1, 1)           # faturamento de jan/2025 a set/2026
+
+LOJAS = {1: "Pinheiros", 2: "Eldorado", 3: "Savassi", 4: "Batel", 5: "E-commerce", 6: "App", 7: "CD Cajamar"}
+LOJA_POR_NOME = {chave_: id_ for id_, n in LOJAS.items() for chave_ in (n.lower(), f"vulto {n.lower()}")} | {
+    "eldorado shop": 2, "shopping eldorado": 2, "cd": 7, "cajamar": 7}
 
 # ----------------------------------------------------------------------------- texto
 
@@ -252,3 +262,88 @@ def salvar_excel(caminho, abas, destaques=None):
                     alvo = range(1, len(df.columns) + 1) if coluna is None else [list(df.columns).index(coluna) + 1]
                     for j in alvo:
                         ws.cell(i, j).fill = PatternFill("solid", start_color=cor)
+
+
+# ----------------------------------------------------------------------------- datas do vulto.db
+
+FORMATOS_DATA = ["%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%d/%m/%Y %H:%M:%S",
+                 "%d/%m/%Y %H:%M", "%d/%m/%Y", "%d/%m/%y", "%Y-%m-%d"]
+
+
+def data_vulto(v):
+    """Data/hora do vulto.db no horário de Brasília (datetime sem fuso).
+
+    Decisão 44: o site, o app e a Eldorado depois de 10/02/2026 gravam em UTC (terminam em 'Z'); o resto grava
+    no horário local. O relatório antigo tratava tudo como se fosse o mesmo relógio."""
+    if vazio(v):
+        return None
+    s = str(v).strip()
+    utc = s.endswith("Z")
+    s = s.rstrip("Z")
+    for f in FORMATOS_DATA:
+        try:
+            d = datetime.strptime(s, f)
+        except ValueError:
+            continue
+        if utc:
+            d = d.replace(tzinfo=timezone.utc).astimezone(FUSO).replace(tzinfo=None)
+        return d
+    return None
+
+
+# ----------------------------------------------------------------------------- código da peça
+
+
+def sku_canonico(codigo):
+    """Qualquer grafia do código (VLT-CAL-001-OLI-38, CAL001V38, 'vlt cal 001 verde oliva 38') -> SKU do catálogo."""
+    p = ler_codigo_produto(codigo)
+    if not p or not p[3] or not tamanho_padrao(p[3]):
+        return None
+    return montar_sku(p[0], p[1], p[2], tamanho_padrao(p[3]))
+
+
+# ----------------------------------------------------------------------------- quem é o cliente
+
+ANONIMOS = {"", "consumidor", "nao informado", "não informado", "cliente", "-", "sem cpf", "nao tem", "não tem"}
+
+
+def identificar(ref):
+    """cliente_ref do vulto.db ('cpf, email ou telefone, depende de quem cadastrou') -> (tipo, valor).
+
+    tipo: 'cpf' (11 dígitos válidos), 'email', 'telefone' ('+55 DD 9XXXX-XXXX') ou 'anonimo'.
+    Um número de 11 dígitos só vira CPF se o dígito verificador conferir; senão é tratado como celular."""
+    if vazio(ref) or chave(ref) in ANONIMOS:
+        return "anonimo", None
+    s = str(ref).strip()
+    if "@" in s and not s.startswith("@"):
+        return "email", s.lower()
+    d = digitos(s)
+    pontuado_como_cpf = bool(re.fullmatch(r"\d{3}\.?\d{3}\.?\d{3}[-.]?\d{2}", s.replace(" ", "")))
+    if 9 <= len(d) <= 11 and cpf_valido(d.zfill(11)) and (pontuado_como_cpf or len(d) == 11 or "(" not in s):
+        return "cpf", d.zfill(11)
+    t = telefone_padrao(s)
+    if t:
+        return "telefone", t
+    if len(d) in (8, 9):
+        return "telefone", None                        # celular sem DDD: não dá para identificar
+    return "anonimo", None
+
+
+# ----------------------------------------------------------------------------- transferências escritas no texto
+
+PADROES_TRANSF = [
+    r"enviado (?P<loja>[a-z]+) - (?P<qtd>\d+) pc?s?",   # enviado pinheiros - 1 pçs
+    r"transf p/ (?P<loja>[a-z]+) (?P<qtd>\d+) ?un",       # transf p/ savassi 1un
+    r"(?P<qtd>\d+) un -> (?P<loja>[a-z]+)",               # 1 un -> batel
+    r"transf (?P<loja>[a-z]+) (?P<qtd>\d+)",              # TRANSF SAVASSI 1
+]
+
+
+def ler_transferencia(obs):
+    """Saída de transferência anotada só no texto (o campo qtd fica vazio) -> (id da loja de destino, qtd)."""
+    k = chave(obs)
+    for p in PADROES_TRANSF:
+        m = re.fullmatch(p, k)
+        if m and m.group("loja") in LOJA_POR_NOME:
+            return LOJA_POR_NOME[m.group("loja")], int(m.group("qtd"))
+    return None, None

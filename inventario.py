@@ -153,14 +153,12 @@ def processar(pasta, mestre, skus_2024):
             reg.add(29, "Provador não contado: considerado zero", origem, "qtd", qtd, qtd,
                     "Estoque conservador: melhor menor do que vender sem a peça")
             item("Batel", sku, qtd, "Contado (provador = 0)", "faltou contar provador")
-        elif obs == "recontar":                                   # decisão 30
-            ref = contagens[(contagens.sku == sku) & contagens.loja.isin(["Pinheiros", "Eldorado"])].qtd
-            estimado = int(round(ref.median())) if len(ref) else qtd
-            reg.add(30, "Recontagem não feita: estimado pela mediana", origem, "qtd", qtd, estimado,
-                    f"Mediana do mesmo SKU na Pinheiros/Eldorado ({len(ref)} contagem(ns))" if len(ref)
-                    else "Sem referência nas outras lojas: mantido o contado")
-            item("Batel", sku, estimado, "Estimado (mediana Pinheiros/Eldorado)",
-                 f"contado originalmente: {qtd} (recontagem pedida e não feita)")
+        elif obs == "recontar":                                   # decisão 30 (revisada)
+            # A peça foi contada; só pediram para conferir. A quantidade de outra loja não diz nada sobre a Batel,
+            # então vale o contado (e a diferença aparece no ajuste de inventário, se houver).
+            reg.add(30, "Recontagem não feita: mantido o contado", origem, "qtd", qtd, qtd,
+                    "Mediana de outras lojas descartada: estoque de uma loja não estima o de outra")
+            item("Batel", sku, qtd, "Contado (recontagem pedida e não feita)", "recontar")
         else:
             item("Batel", sku, qtd, "Contado")
 
@@ -220,7 +218,8 @@ def processar(pasta, mestre, skus_2024):
     agrupado["codigo_cd"] = agrupado.sku.map(lambda s: cat.por_sku.get(s, {}).get("codigo_cd"))
     agrupado["nome"] = agrupado.sku.map(lambda s: cat.por_sku.get(s, {}).get("nome"))
     agrupado["status_catalogo"] = agrupado.sku.map(cat.status)
-    agrupado["candidato_liquidacao"] = agrupado.status_catalogo.isin(["Descontinuado", FORA_DO_CATALOGO_2026]) \
+    agrupado["candidato_liquidacao"] = agrupado.status_catalogo.isin(["Descontinuado", FORA_DO_CATALOGO_2026,
+                                                                      "Coleção 2024 (só estoque)"]) \
         .map({True: "Sim", False: "Não"})                          # decisão 36
     for loja in ["Eldorado", "Savassi", "Batel", "CD Cajamar"]:
         reg.add(34, "Sem registro de avaria", loja, None, None, 0, "Avaria considerada inexistente")
