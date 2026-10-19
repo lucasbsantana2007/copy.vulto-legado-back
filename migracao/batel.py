@@ -72,7 +72,7 @@ def itens_com_sku(itens, vendas, produtos):
     """Cada peça da planilha com o SKU do catálogo e o preço (o preço do catálogo, ajustado para a soma dos itens
     fechar com o valor da venda). Devolve (linhas, nao_achados)."""
     import sys
-    sys.path.insert(0, os.path.join(caminhos.MIGRACAO, "padronizacao"))
+    sys.path.append(os.path.join(caminhos.MIGRACAO, "padronizacao"))  # por último: os scripts do time têm prioridade
     from comum import tamanho_padrao
 
     indice = {}
