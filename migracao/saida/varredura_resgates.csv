@@ -1,0 +1,19 @@
+﻿linha_resgates;data;loja;anotado;pontos;resultado;vendas_no_dia;candidatos;decisao;cpfs
+15;2023-04-03;Eldorado;Rodrigo;300;Sem fonte;;;Continua pendente: o vulto.db só tem vendas a partir de 01/01/2025;
+17;2023-05-03;Eldorado;Luan;500;Sem fonte;;;Continua pendente: o vulto.db só tem vendas a partir de 01/01/2025;
+53;2024-10-02;Savassi;Juliana;1000;Sem fonte;;;Continua pendente: o vulto.db só tem vendas a partir de 01/01/2025;
+56;2024-11-01;Batel;Alexandre;300;Sem fonte;;;Continua pendente: o vulto.db só tem vendas a partir de 01/01/2025;
+58;2024-11-08;Eldorado;Leonardo;100;Sem fonte;;;Continua pendente: o vulto.db só tem vendas a partir de 01/01/2025;
+59;2024-11-14;Batel;Mariana;500;Sem fonte;;;Continua pendente: o vulto.db só tem vendas a partir de 01/01/2025;
+104;2025-03-19;Eldorado;Camila;1500;1 CPF;14.0;"Camila Alves 713.220.125-55 (venda 1852 de 19/03/2025 (CPF da venda), desconto R$ 75.00; saldo antes do resgate 2184 pts)";Preencher o CPF (confiança alta: venda do dia com o mesmo desconto);713.220.125-55
+144;2025-06-04;Pinheiros;Melissa;500;1 CPF;24.0;"Melissa Mendes Moreira 851.054.001-27 (venda 3884 de 04/06/2025 (CPF da venda), desconto R$ 25.00; atendimento 40466 em 22/05/2025; saldo antes do resgate 11753 pts)";Preencher o CPF (confiança alta: venda do dia com o mesmo desconto);851.054.001-27
+159;2025-06-24;Eldorado;João;2000;1 CPF;15.0;"João Oliveira Cardoso 355.339.925-29 (venda 4467 de 24/06/2025 (CPF da venda), desconto R$ 100.00; saldo antes do resgate 2698 pts)";Preencher o CPF (confiança alta: venda do dia com o mesmo desconto);355.339.925-29
+249;2025-10-26;Eldorado;Hugo;300;1 CPF;13.0;"Hugo Peixoto 337.384.467-37 (venda 7693 de 26/10/2025 (CPF da venda), desconto R$ 15.00; saldo antes do resgate 3113 pts)";Preencher o CPF (confiança alta: venda do dia com o mesmo desconto);337.384.467-37
+251;2025-10-26;Batel;Carolina;300;1 CPF;8.0;"Carolina Rodrigues 108.127.090-04 (venda 7705 de 26/10/2025 (CPF da venda), desconto R$ 15.00; atendimento 41557 em 08/11/2025; saldo antes do resgate 2410 pts)";Preencher o CPF (confiança alta: venda do dia com o mesmo desconto);108.127.090-04
+265;2025-11-14;Savassi;Giovanna;1000;1 CPF;14.0;"Giovanna Oliveira 488.812.996-74 (venda 8330 de 14/11/2025 (CPF da venda), desconto R$ 50.00; saldo antes do resgate 1885 pts)";Preencher o CPF (confiança alta: venda do dia com o mesmo desconto);488.812.996-74
+324;2026-01-09;Batel;Ícaro;1000;1 CPF;15.0;"Ícaro Rodrigues 477.066.637-36 (venda 10851 de 09/01/2026 (CPF da venda), desconto R$ 50.00; saldo antes do resgate 2323 pts)";Preencher o CPF (confiança alta: venda do dia com o mesmo desconto);477.066.637-36
+394;2026-03-23;Batel;Alexandre;1000;1 CPF;18.0;"Alexandre Cardoso 090.516.597-76 (venda 12807 de 23/03/2026 (CPF da venda), desconto R$ 50.00; saldo antes do resgate 1851 pts)";Preencher o CPF (confiança alta: venda do dia com o mesmo desconto);090.516.597-76
+442;2026-05-15;Pinheiros;Laura;1500;1 CPF;25.0;"Laura Teixeira Costa 420.805.536-74 (venda 14295 de 15/05/2026 (CPF da venda), desconto R$ 75.00; saldo antes do resgate 2579 pts)";Preencher o CPF (confiança alta: venda do dia com o mesmo desconto);420.805.536-74
+523;2026-07-12;Savassi;Nicole;500;1 CPF;16.0;"Nicole Batista 923.325.620-01 (venda 16347 de 12/07/2026 (CPF da venda), desconto R$ 25.00; saldo antes do resgate 7815 pts)";Preencher o CPF (confiança alta: venda do dia com o mesmo desconto);923.325.620-01
+554;2026-08-11;Savassi;Júlia;500;1 CPF, desconto diferente;7.0;"Julia Fernandes 558.971.099-58 (venda 17215 de 11/08/2026 (CPF da venda), desconto R$ 33.00; saldo antes do resgate 16221 pts)";Sugestão (confiança média): não preencher o CPF;558.971.099-58
+582;2026-09-16;Eldorado;João;500;0 CPF;5.0;;Continua pendente: nenhuma venda da loja no dia com cliente desse nome;
