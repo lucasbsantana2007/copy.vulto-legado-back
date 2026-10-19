@@ -49,7 +49,28 @@ def num(x):
     return f"{x:,.0f}".replace(",", ".")
 
 
+COMMIT_ORIGINAL = "a792f97"            # commit do copy.vulto-legado-back com o vulto.db original
+
+
+def ja_corrigido(pasta):
+    """O vulto.db do repositório foi trocado pela versão corrigida. Corrigir de novo estragaria os dados (ex.: dividir
+    por 100 o que já está em reais), então o script precisa do original."""
+    with sqlite3.connect(os.path.join(pasta, "vulto.db")) as c:
+        utc = c.execute("select count(*) from vendas where criado_em like '%Z'").fetchone()[0]
+        ponto = c.execute("select valor from config where chave = 'valor_ponto'").fetchone()
+    return utc == 0 and ponto and ponto[0] == "0.05"
+
+
 def main(pasta, saida):
+    if ja_corrigido(pasta):
+        sys.exit(f"""
+O vulto.db em {pasta} já é a versão CORRIGIDA. Rode o script com o original, que está no histórico do git:
+
+    mkdir -p entrada
+    cp {pasta}/*.xlsx {pasta}/*.csv entrada/
+    git -C {os.path.dirname(os.path.abspath(pasta))} show {COMMIT_ORIGINAL}:data/vulto.db > entrada/vulto.db
+    python rodar_tudo.py entrada {saida}
+""")
     os.makedirs(saida, exist_ok=True)
     caminho = lambda nome: os.path.join(saida, nome)
     registros = []

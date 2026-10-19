@@ -6,11 +6,21 @@ alterados**: o relatório antigo da Vulto precisa continuar reproduzível para a
 
 ## Como rodar
 
+O `data/vulto.db` do repositório `copy.vulto-legado-back` já foi trocado pela versão corrigida (branch
+`dados-corrigidos`). O script precisa dos dados **originais**, que continuam no histórico do git (commit `a792f97`):
+
 ```bash
 pip install pandas openpyxl pytest
-python rodar_tudo.py ../vulto-legado-back/data saida
+mkdir -p entrada
+cp ../../copy.vulto-legado-back/data/*.xlsx ../../copy.vulto-legado-back/data/*.csv entrada/
+git -C ../../copy.vulto-legado-back show a792f97:data/vulto.db > entrada/vulto.db
+python rodar_tudo.py entrada saida
 python -m pytest
 ```
+
+Se o script receber o banco já corrigido, ele para e mostra esses comandos (corrigir duas vezes estragaria os
+dados). Para atualizar o repositório depois de mudar alguma regra: `cp saida/vulto_corrigido.db
+../../copy.vulto-legado-back/data/vulto.db`.
 
 Leva cerca de 1 minuto. Cada domínio também roda sozinho (ex.: `python vendas.py ../vulto-legado-back/data`).
 
