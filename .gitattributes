@@ -1,0 +1,2 @@
+# CSVs gerados pelos scripts: sempre LF no repositório (Windows e Mac geram finais de linha diferentes)
+migracao/saida/*.csv text eol=lf
