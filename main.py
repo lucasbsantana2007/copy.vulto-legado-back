@@ -5,11 +5,13 @@ from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime
 import base64
+import csv
+import io
 import os
 import pandas as pd
 
 from banco import query, execute, get_config, conn
-from planilha import ler_clientes, busca_cliente, limpa_cpf, parse_pontos, anota_resgate
+from planilha import ler_clientes, busca_cliente, limpa_cpf, cpf_texto, parse_pontos, anota_resgate
 from catalogo import ler_catalogo, busca_produto
 
 app = FastAPI(title="Vulto Sistema (Vulto+ / Loja / Estoque)", version="2.3.1")
@@ -162,13 +164,18 @@ def lojas():
 @app.get("/exportar")
 def exportar():
     # usado pelo financeiro no excel deles
+    # padrão de todo CSV exportado: separador ";", UTF-8 com BOM (o Excel lê os acentos) e CPF como texto
+    # 000.000.000-00 (o export antigo saía com o CPF em número e o Excel cortava o zero da frente: decisão 18)
     df = ler_clientes()
-    linhas = ["nome;cpf;email;categoria;pontos"]
+    saida = io.StringIO()
+    escritor = csv.writer(saida, delimiter=";", lineterminator="\r\n")
+    escritor.writerow(["nome", "cpf", "email", "categoria", "pontos"])
     for i, row in df.iterrows():
-        linhas.append(f"{row['Nome']};{row['cpf']};{row['E-mail']};{row['categoria']};{row['Pontos']}")
-    conteudo = "\n".join(linhas)
-    return Response(content=conteudo.encode("latin-1", errors="replace"), media_type="text/csv",
-                    headers={"Content-Disposition": "attachment; filename=clientes.csv"})
+        escritor.writerow([str(row["Nome"]).strip(), cpf_texto(row["cpf"]), str(row["E-mail"]).strip(),
+                           str(row["categoria"]).strip(), str(row["Pontos"]).strip()])
+    nome = f"clientes_{datetime.now():%Y-%m-%d}.csv"
+    return Response(content=saida.getvalue().encode("utf-8-sig"), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f"attachment; filename={nome}"})
 
 
 # @app.get("/admin/recalcular")

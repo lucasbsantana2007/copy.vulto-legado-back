@@ -23,6 +23,15 @@ def limpa_cpf(cpf):
     return str(cpf).replace(".", "").replace("-", "")
 
 
+def cpf_texto(cpf):
+    # 000.000.000-00: devolve o zero da frente que o Excel corta e, com os pontos, o Excel não lê como número de novo
+    digitos = "".join(c for c in str(cpf) if c.isdigit())
+    if 9 <= len(digitos) <= 11:
+        digitos = digitos.zfill(11)
+        return f"{digitos[:3]}.{digitos[3:6]}.{digitos[6:9]}-{digitos[9:]}"
+    return digitos
+
+
 def parse_pontos(p):
     try:
         if p == "" or p is None:
