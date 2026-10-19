@@ -8,7 +8,7 @@ Tudo o que o time limpou e decidiu sobre os dados da Vulto, carregado no `data/v
 |---|---|---|---|
 | Faturamento jan/25–set/26 | R$ 94.580.496,26 (`/relatorio/faturamento`) | **R$ 6.498.071,30** (frete incluído, decisão 4) | Centavos do app (−R$ 87,5 mi), cancelados e não pagos, testes, duplicados, trocas, Batel (decisões 1 e 9 a 17) |
 | Estoque em 01/10/2026 | 46.302 peças (tabela `estoque`) | **15.216 peças** (Savassi oficial por modelo: 2.105) | Lojas 5 e 6 copiam o CD, transferências nunca baixadas, saldos negativos (decisões 27 a 37) |
-| Passivo de pontos em 01/10/2026 | 8.829.352 pontos | **3.375.341 pontos = R$ 168.767,05** | Créditos ×100 do app, compras canceladas, trocas, vencimento de 12 meses (decisões 18 a 26). Em aberto: dobro online (+R$ 31.587,85) e pontos da Batel (+R$ 543,55), decisões 40 e 41 |
+| Passivo de pontos em 01/10/2026 | 8.829.352 pontos | **3.373.251 pontos = R$ 168.662,55** | Créditos ×100 do app, compras canceladas, trocas, resgates anotados só na planilha, vencimento de 12 meses (decisões 18 a 26 e 47 a 50). Em aberto: dobro online (+R$ 31.581,85) e pontos da Batel (+R$ 543,55), decisões 40 e 41 |
 
 Os detalhes de cada número estão nas consultas 3, 5, 8 e 11 do `consultas.sql`.
 
@@ -55,10 +55,17 @@ Para conferir o banco como está: `python migracao/validar.py`.
 ## Pastas
 
 - `migracao/entrada/` — planilhas que o time limpou à mão. **É aqui que se edita.**
+  A `clientes_fidelidade_FINAL_v3 (1).xlsx` é a planilha do Vulto+ limpa em 19/10/2026: um cliente por CPF, a aba
+  Resgates com o CPF de cada resgate identificado, a aba Pendências (o que falta confirmar com as lojas) e o
+  "Relatório de Mudanças". É a fonte dos clientes e dos pontos do `clientes_pontos.py`. Para resolver um resgate
+  pendente, digite o CPF na coluna B da aba Resgates e rode o `carregar.py`. O `varredura_resgates.py` refaz a
+  busca dos resgates anotados só com o primeiro nome (venda do dia na mesma loja, com o mesmo desconto) e grava o
+  resultado em `saida/varredura_resgates.csv` (decisão 48).
   O `clientes atualizado.xlsx` nasceu do botão "Exportar CSV" do sistema da Vulto (`GET /exportar`, rodando o
   sistema localmente), que lê a planilha `clientes_fidelidade_FINAL_v3 (1).xlsx`; o time limpou o CSV à mão. Ao abrir
   esse CSV, o Excel cortou o zero da frente de 80 CPFs (decisão 18). Desde então o `/exportar` sai com o CPF como texto
-  (000.000.000-00) e em UTF-8: um export novo pode ser aberto no Excel sem perder o zero.
+  (000.000.000-00) e em UTF-8: um export novo pode ser aberto no Excel sem perder o zero. Hoje ele só serve para
+  marcar quais clientes tinham ficado de fora dessa limpeza.
 - `migracao/consultas.sql` — consultas prontas para ver os resultados no banco (pendências, faturamento por mês, passivo, estoque).
 - `migracao/registro_decisoes.md` — o registro de decisões, no formato do brief. Toda decisão nova entra aqui (as abas Decisões das planilhas geradas são lidas daqui).
 - `migracao/padronizacao/` — os scripts do Arthur que limpam as planilhas e o vulto.db (com o histórico dos commits).
