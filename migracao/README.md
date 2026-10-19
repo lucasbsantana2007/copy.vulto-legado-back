@@ -2,6 +2,16 @@
 
 Tudo o que o time limpou e decidiu sobre os dados da Vulto, carregado no `data/vulto.db` por um comando só.
 
+## Os três números (jan/2025 a set/2026 e posição em 01/10/2026)
+
+| Número | Sistema da Vulto | Nosso número | De onde vem a diferença |
+|---|---|---|---|
+| Faturamento jan/25–set/26 | R$ 94.580.496,26 (`/relatorio/faturamento`) | **R$ 6.498.071,30** (frete incluído, decisão 4) | Centavos do app (−R$ 87,5 mi), cancelados e não pagos, testes, duplicados, trocas, Batel (decisões 1 e 9 a 17) |
+| Estoque em 01/10/2026 | 46.302 peças (tabela `estoque`) | **15.216 peças** (Savassi oficial por modelo: 2.105) | Lojas 5 e 6 copiam o CD, transferências nunca baixadas, saldos negativos (decisões 27 a 37) |
+| Passivo de pontos em 01/10/2026 | 8.829.352 pontos | **3.375.341 pontos = R$ 168.767,05** | Créditos ×100 do app, compras canceladas, trocas, vencimento de 12 meses (decisões 18 a 26). Em aberto: dobro online (+R$ 31.587,85) e pontos da Batel (+R$ 543,55), decisões 40 e 41 |
+
+Os detalhes de cada número estão nas consultas 3, 5, 8 e 11 do `consultas.sql`.
+
 ```bash
 pip install -r requirements.txt
 python migracao/carregar.py
@@ -13,20 +23,34 @@ As tabelas originais da Vulto (`lojas`, `vendas`, `itens_venda`, `compras`, `pon
 
 | Tabela | O que é |
 |---|---|
-| `vendas_padronizadas` | Uma linha por venda: data em Brasília, loja, canal, cliente, vendedor, valores em reais, status, tipo e se entra no faturamento (Sim / Não / Pendente) com o motivo |
-| `itens_venda_padronizados` | Itens das vendas com o preço em reais (o app gravava centavos) |
+| `vendas_padronizadas` | Uma linha por venda: data em Brasília, loja, canal, cliente, vendedor, valores em reais, status, tipo e se entra no faturamento (Sim / Não) com o motivo. Inclui as vendas da Batel feitas sem sistema (`BATEL-<Nº>`) |
+| `itens_venda_padronizados` | Itens das vendas com o preço em reais (o app gravava centavos) e o SKU do catálogo (o código como veio fica em `sku_original`) |
 | `clientes_padronizados` | Um cliente por CPF (texto, com o zero da frente), categoria pela regra nova e saldo de pontos em 01/10/2026 |
 | `extrato_pontos` | Cada movimento de pontos, com a situação (mantido, corrigido ou descartado) e o motivo |
 | `estoque_01_10` | Estoque em 01/10/2026 por SKU e por local (lojas + CD) |
 | `estoque_movimentos_set26` | Vendas e transferências entre a contagem e 01/10 |
 | `estoque_savassi_por_modelo` | A Savassi como foi contada (por modelo): o número oficial dela |
+| `estoque_historico` | O histórico do estoque, um movimento por linha com o saldo, de 01/01/2025 a 01/10/2026: a posição em qualquer data é a soma até ela (decisões 44 e 45) |
+| `produtos_padronizados` | O catálogo: um produto por SKU, com preço, custo, EAN, fornecedor, coleção e status (decisões 38 e 39) |
+| `atendimentos_padronizados` | Os atendimentos de WhatsApp, Instagram e e-mail, ligados ao cliente e à venda (decisões 42 e 43) |
 | `registro_decisoes` | O registro de decisões (cópia do `registro_decisoes.md`) |
+
+## Conferência
+
+O `carregar.py` termina com o `validar.py`, que confere as tabelas antes de gravar: tabelas originais intactas, SKU de
+todo item e de todo estoque no catálogo, histórico do estoque fechando com o número oficial, nenhuma venda de teste ou
+não paga no faturamento, CPF único, atendimento ligado só a venda e cliente que existem. Se algo falhar, nada é gravado.
+Para conferir o banco como está: `python migracao/validar.py`.
 
 ## Pastas
 
 - `migracao/entrada/` — planilhas que o time limpou à mão. **É aqui que se edita.**
 - `migracao/consultas.sql` — consultas prontas para ver os resultados no banco (pendências, faturamento por mês, passivo, estoque).
 - `migracao/registro_decisoes.md` — o registro de decisões, no formato do brief. Toda decisão nova entra aqui (as abas Decisões das planilhas geradas são lidas daqui).
+- `migracao/padronizacao/` — os scripts do Arthur que limpam as planilhas e o vulto.db (com o histórico dos commits).
+  O `carregar.py` usa o leitor de códigos (`comum.py`) e a padronização do atendimento (`atendimento.py`); o resto da
+  pasta é uma versão paralela, com regras que o time trocou em 15/10 e 19/10 (frete, categoria, tamanho no SKU): fica
+  como referência e **não** é a fonte dos números oficiais.
 - `migracao/saida/` — o que os scripts geram para conferir no Excel (`clientes atualizado v2.xlsx`, `estoque_vulto_01-10-2026.xlsx`, `vendas_padronizadas.csv`, o log de cada valor alterado e o gráfico das faixas de valor de compra). Não edite aqui: é sobrescrito a cada rodada.
 
 ## Editando em grupo

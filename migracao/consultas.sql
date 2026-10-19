@@ -50,5 +50,34 @@ from estoque_01_10;
 -- 9. Uma peça em todos os locais (troque o SKU)
 select * from estoque_01_10 where sku like 'VLT-CAL-001-OLI%';
 
+-- 11. Estoque de uma loja numa data qualquer (troque o local e a data): "quanto tinha na loja X há duas semanas"
+select local, sum(qtd) as pecas
+from estoque_historico
+where local = 'Pinheiros' and data <= '2026-09-17'
+group by local;
+
+-- 12. Histórico de uma peça numa loja, movimento a movimento (troque o SKU e o local)
+select data, tipo, qtd, saldo, origem from estoque_historico
+where sku = 'VLT-CAM-004-BRA-M' and local = 'CD Cajamar'
+order by rowid;
+
+-- 13. O que o sistema não registrou: ajuste de inventário por local
+select local, sum(qtd) as pecas, count(*) as skus from estoque_historico
+where tipo like 'Ajuste de invent%'
+group by local;
+
+-- 14. Uma venda com os itens e os produtos (troque o id; as vendas da Batel feitas sem sistema são BATEL-<Nº>)
+select v.id_venda, v.data, v.loja, v.valor_total, i.sku, i.sku_original, p.produto, p.cor, p.tamanho, i.qtd, i.preco_unit
+from vendas_padronizadas v
+join itens_venda_padronizados i on i.venda_id = v.id_venda
+left join produtos_padronizados p on p.sku = i.sku
+where v.id_venda = 'BATEL-2';
+
+-- 15. Atendimentos de um cliente, com a venda ligada (troque o CPF)
+select a.data, a.canal, a.assunto, a.status, a.pedido, a.id_venda, a.venda_confere
+from atendimentos_padronizados a
+where a.cliente_cpf = '191.281.999-60'
+order by substr(a.data, 7, 4) || substr(a.data, 4, 2) || substr(a.data, 1, 2);
+
 -- 10. Registro de decisões ainda em aberto
 select numero, o_que_encontramos, o_que_decidimos_fazer from registro_decisoes where o_que_decidimos_fazer like '%A decidir%';

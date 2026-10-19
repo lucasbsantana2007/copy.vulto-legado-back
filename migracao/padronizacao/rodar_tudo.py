@@ -301,5 +301,6 @@ def impactos(ven, pts, est, cli, clientes_final, cat, ocorr):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1] if len(sys.argv) > 1 else "../vulto-legado-back/data",
-         sys.argv[2] if len(sys.argv) > 2 else "saida")
+    aqui = os.path.dirname(os.path.abspath(__file__))
+    main(sys.argv[1] if len(sys.argv) > 1 else os.path.join(aqui, "..", "..", "data"),
+         sys.argv[2] if len(sys.argv) > 2 else os.path.join(aqui, "saida"))

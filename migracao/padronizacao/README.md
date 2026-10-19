@@ -1,4 +1,12 @@
-# Padronização dos dados da Vulto
+# Padronização dos dados da Vulto (scripts do Arthur)
+
+> **Os números oficiais saem do `migracao/carregar.py`** (ver `migracao/README.md` e `migracao/registro_decisoes.md`).
+> Esta pasta guarda os scripts do Arthur, que limpam as planilhas e o `vulto.db`, com o histórico dos commits (a versão
+> dele e as correções de 19/10). O `carregar.py` usa daqui o leitor de códigos (`comum.py`) e a padronização do
+> atendimento (`atendimento.py`). O resto é uma versão paralela: algumas regras foram trocadas pelo time em 15/10 e 19/10
+> (frete é receita, categoria com Vip pelo saldo, tamanho em número no SKU de calça e bermuda, vírgula decimal,
+> validade de 12 meses para todos), então os números desta pasta não são os oficiais. A numeração das decisões daqui
+> também é própria (não é a do `registro_decisoes.md`).
 
 Corrige as planilhas **e o `vulto.db`** antes da migração para a plataforma da Casa Lorenzi, aplica as 69 decisões
 do Registro de Decisões e calcula os três números pedidos pela diretoria. Os arquivos originais **não são
@@ -6,23 +14,14 @@ alterados**: o relatório antigo da Vulto precisa continuar reproduzível para a
 
 ## Como rodar
 
-O `data/vulto.db` do repositório `copy.vulto-legado-back` já foi trocado pela versão corrigida (branch
-`dados-corrigidos`). O script precisa dos dados **originais**, que continuam no histórico do git (commit `a792f97`):
-
 ```bash
 pip install pandas openpyxl pytest
-mkdir -p entrada
-cp ../../copy.vulto-legado-back/data/*.xlsx ../../copy.vulto-legado-back/data/*.csv entrada/
-git -C ../../copy.vulto-legado-back show a792f97:data/vulto.db > entrada/vulto.db
-python rodar_tudo.py entrada saida
-python -m pytest
+python migracao/padronizacao/rodar_tudo.py          # lê data/ do repositório e grava em migracao/padronizacao/saida
+python -m pytest migracao/padronizacao
 ```
 
-Se o script receber o banco já corrigido, ele para e mostra esses comandos (corrigir duas vezes estragaria os
-dados). Para atualizar o repositório depois de mudar alguma regra: `cp saida/vulto_corrigido.db
-../../copy.vulto-legado-back/data/vulto.db`.
-
-Leva cerca de 1 minuto. Cada domínio também roda sozinho (ex.: `python vendas.py ../vulto-legado-back/data`).
+As tabelas originais do `data/vulto.db` nunca mudam (o `carregar.py` só acrescenta tabelas padronizadas), então este
+script sempre lê os dados originais. A trava de `rodar_tudo.py` impede rodar em cima de um banco já corrigido.
 
 ## O que sai na pasta `saida/`
 
