@@ -504,8 +504,9 @@ REGRAS = [
     "- CPF é a chave do cliente e é guardado como texto com 11 dígitos (o zero da frente não pode sumir).",
     "- Dois cadastros com o mesmo CPF são a mesma pessoa: viram um só e os pontos são somados.",
     "- Mensagens (LGPD): se o cliente disse Sim em algum cadastro, aceita; se não disse nada ou disse Não, não aceita.",
-    "- CPF inválido: no próximo login o cliente precisa atualizar os dados (CPF) para continuar usando os benefícios;",
-    "  até lá os pontos ficam guardados.",
+    "- Login: com CPF ou e-mail, sempre com senha. E-mail usado por mais de um cliente não serve para entrar (entra pelo CPF).",
+    "- CPF inválido: o cliente entra pelo e-mail e, no próximo login, precisa atualizar o CPF para continuar usando os",
+    "  benefícios; até lá os pontos ficam guardados. Sem e-mail próprio, o atendimento ou a loja corrige o CPF.",
 ]
 
 
@@ -592,7 +593,7 @@ def main():
     ]
 
     resumo += pendencias(clientes, extrato, por_cliente, reais)
-    decisoes = registro.decisoes(18, 26) + registro.decisoes(40, 41) + registro.decisoes(47, 52)
+    decisoes = registro.decisoes(18, 26) + registro.decisoes(40, 41) + registro.decisoes(47, 53)
     escrever(clientes, extrato, invalidos, pendentes, resumo, decisoes)
 
     print(f"clientes: {len(clientes) - len(so_no_sistema)} no cadastro ({recuperados} recuperados) + {len(so_no_sistema)} só no sistema")
