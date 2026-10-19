@@ -1,21 +1,25 @@
 """Clientes do Vulto+ corrigidos e saldo de pontos de cada um em 01/10/2026.
 
 Entradas (só leitura):
-- clientes_fidelidade_FINAL_v3 (1).xlsx (abas Clientes e Resgates) e vulto.db (pontos_mov, compras, vendas)
-- clientes atualizado.xlsx (limpeza do time: nome, e-mail e categoria de cada CPF)
+- migracao/entrada/clientes_fidelidade_FINAL_v3 (1).xlsx: a planilha de fidelidade limpa pelo time em 19/10/2026
+  (abas Clientes e Resgates): um cliente por CPF (duplicados já juntados, pontos somados), CPF com o zero da frente,
+  pontos congelados em 01/01/2025 (zerados para quem se cadastrou depois) e o CPF de cada resgate que deu para identificar
+- data/clientes_fidelidade_FINAL_v3 (1).xlsx: a original, só para reproduzir o saldo que o sistema da Vulto mostra
+- migracao/entrada/clientes atualizado.xlsx: a limpeza de 15/10, só para marcar os clientes que tinham ficado de fora
+- vulto.db (pontos_mov, compras, vendas)
 - vulto_padronizado.db, tabela vendas_padronizadas (status de cada venda; rode padroniza_vendas.py antes)
 
 Saída: migracao/saida/"clientes atualizado v2.xlsx", com as abas Clientes, Extrato, Resumo,
 Regras Vulto+, Decisões e Pendências.
 
-Regras (decididas pelo time em 15/10/2026):
+Regras (decididas pelo time em 15/10/2026 e na limpeza de 19/10/2026):
 - CPF é texto com 11 dígitos: o zero da frente que o Excel cortou volta antes de validar.
 - Cadastros com o mesmo CPF viram um só e os pontos da planilha são somados (sempre).
-- aceita_msg: se algum cadastro diz Sim, é Sim; se não disse nada ou disse Não, é Não.
+- aceita_msg: Sim só com Sim registrado; Não ou Não informado é Não.
 - Validade: só valem os pontos ganhos nos últimos 12 meses (de 01/10/2025 a 01/10/2026). Os resgates
   gastam primeiro os pontos mais antigos.
 - Categoria pelo saldo válido em 01/10/2026: 0 sem categoria, 1 a 1.500 Bronze, 1.501 a 5.000 Prata,
-  5.001 a 10.000 Ouro, acima de 10.000 Vip.
+  5.001 a 9.999 Ouro, 10.000 ou mais Vip.
 
 Uso: python migracao/clientes_pontos.py
 """
@@ -36,9 +40,10 @@ from openpyxl.utils import get_column_letter
 import caminhos
 import registro
 
-PLANILHA = os.path.join(caminhos.DADOS, "clientes_fidelidade_FINAL_v3 (1).xlsx")
+PLANILHA = os.path.join(caminhos.ENTRADA, "clientes_fidelidade_FINAL_v3 (1).xlsx")
+ORIGINAL = os.path.join(caminhos.DADOS, "clientes_fidelidade_FINAL_v3 (1).xlsx")
+DO_TIME = os.path.join(caminhos.ENTRADA, "clientes atualizado.xlsx")  # limpeza de 15/10, só para marcar quem tinha saído
 LEGADO = caminhos.VULTO_DB
-DO_TIME = os.path.join(caminhos.ENTRADA, "clientes atualizado.xlsx")
 PADRONIZADO = caminhos.PADRONIZADO
 SAIDA = os.path.join(caminhos.SAIDA, "clientes atualizado v2.xlsx")
 
@@ -47,7 +52,7 @@ CORTE = datetime(2026, 10, 1, tzinfo=BRASILIA)
 INICIO_VALIDADE = datetime(2025, 10, 1, tzinfo=BRASILIA)
 CONGELAMENTO = datetime(2025, 1, 1, tzinfo=BRASILIA)  # a coluna Pontos da planilha foi congelada aqui
 VALOR_PONTO = 0.05  # 100 pontos = R$ 5 (regra desde mar/2025)
-FAIXAS = ((10001, "Vip"), (5001, "Ouro"), (1501, "Prata"), (1, "Bronze"), (0, "Sem categoria"))
+FAIXAS = ((10000, "Vip"), (5001, "Ouro"), (1501, "Prata"), (1, "Bronze"), (0, "Sem categoria"))
 
 LOJAS = {
     "site": "Site", "ecommerce": "Site", "app": "App", "pinheiros": "Pinheiros", "eldorado": "Eldorado",
@@ -55,7 +60,6 @@ LOJAS = {
 }
 STATUS_SEM_PONTO = {"Cancelada", "Estornada", "Chargeback"}
 MESES = {m: i for i, m in enumerate(["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"], 1)}
-PARTICULAS = {"de", "da", "do", "das", "dos", "e"}
 
 
 # ---------------------------------------------------------------- leitura e normalização
@@ -145,13 +149,9 @@ def sem_acento(texto: str) -> str:
     return " ".join(unicodedata.normalize("NFKD", str(texto)).encode("ascii", "ignore").decode().lower().split())
 
 
-def nome_bonito(texto) -> str:
-    palavras = str(texto).split()
-    return " ".join(p.lower() if p.lower() in PARTICULAS and i else p[:1].upper() + p[1:].lower() for i, p in enumerate(palavras))
-
-
 def aceita(valor) -> str:
-    return "Sim" if str(valor).strip().lower() in ("1", "sim", "s", "x") else "Não"
+    """A planilha limpa já traz Sim / Não / Não informado; só o Sim registrado vale (LGPD)."""
+    return "Sim" if str(valor).strip().lower() == "sim" else "Não"
 
 
 def telefone(valor) -> str:
@@ -159,17 +159,6 @@ def telefone(valor) -> str:
     if digitos.startswith("55") and len(digitos) in (12, 13):
         digitos = digitos[2:]
     return digitos
-
-
-def categoria_escrita(valores) -> str:
-    """Categoria escrita à mão na planilha (bronze, brz, Silver, ouro ★, vip?...), no padrão do arquivo do time."""
-    for valor in valores:
-        nome = sem_acento(texto(valor))
-        for chave, padrao in (("vip", "Vip"), ("ouro", "Ouro"), ("gold", "Ouro"), ("prata", "Prata"), ("silver", "Prata"),
-                              ("bronze", "Bronze"), ("brz", "Bronze")):
-            if chave in nome:
-                return padrao
-    return ""
 
 
 def categoria(saldo: int) -> str:
@@ -180,41 +169,43 @@ def categoria(saldo: int) -> str:
 
 
 def montar_clientes():
-    bruto = pd.read_excel(PLANILHA, sheet_name="Clientes", dtype=object)
-    time = pd.read_excel(DO_TIME, dtype=object)
-    time["cpf"] = time["CPF"].map(cpf_11)
-    do_time = time.set_index("cpf")
-
-    bruto["cpf"] = bruto["cpf"].map(cpf_11)
-    bruto["linha"] = bruto.index + 2
+    """Aba Clientes da planilha limpa: já vem com um cliente por CPF (os duplicados foram juntados com os pontos
+    somados, a data de cadastro mais antiga e o contato mais recente; as linhas de origem estão na Obs)."""
+    planilha = pd.read_excel(PLANILHA, sheet_name="Clientes", dtype=object)
+    planilha["cpf"] = planilha["CPF"].map(cpf_11)
+    planilha["linha"] = planilha.index + 2
     # CPF com dígito verificador inválido fica (marcado), decisão do time em 15/10/2026; só sai quem não tem CPF
-    invalidos = bruto[bruto["cpf"] == ""]
-    com_cpf = bruto[bruto["cpf"] != ""].copy()
-    com_cpf["data"] = com_cpf["Data Cadastro"].map(data_cadastro)
+    invalidos = planilha[planilha["cpf"] == ""]
+    no_arquivo_do_time = set(pd.read_excel(DO_TIME, dtype=object)["CPF"].map(cpf_11))
 
     clientes = {}
-    for cpf, grupo in com_cpf.groupby("cpf", sort=False):
-        grupo = grupo.sort_values("data", na_position="last")
-        primeiro, ultimo = grupo.iloc[0], grupo.iloc[-1]
-        no_time = cpf in do_time.index
-        loja = texto(primeiro["loja_cadastro"]).lower()
+    for r in planilha[planilha["cpf"] != ""].to_dict("records"):
+        cpf, obs = r["cpf"], texto(r["Obs"])
+        unificado = re.search(r"Cadastro unificado \((\d+) linhas: ([\d, ]+)\)", obs)
+        loja = texto(r["Loja Cadastro"]).lower()
         clientes[cpf] = {
             "cpf": cpf,
-            "nome": texto(do_time.at[cpf, "Nome"]) if no_time else nome_bonito(texto(primeiro["Nome"])),
-            "email": texto(do_time.at[cpf, "E-mail"] if no_time else primeiro["E-mail"]).lower(),
-            "telefone": telefone(next((t for t in reversed(grupo["Tel"].tolist()) if so_digitos(t)), "")),
-            "cadastro": grupo["data"].dropna().min() if grupo["data"].notna().any() else None,
+            "nome": texto(r["Nome"]),
+            "email": texto(r["E-mail"]).lower(),
+            "telefone": telefone(r["Telefone"]),
+            "cadastro": data_cadastro(r["Data Cadastro"]),
             "loja": LOJAS.get(loja, loja.title()),
-            "aceita": "Sim" if (grupo["aceita_msg"].map(aceita) == "Sim").any() else "Não",
-            "fundidos": len(grupo),
-            "pontos_planilha": int(grupo["Pontos"].map(pontos).sum()),
-            "categoria_planilha": texto(do_time.at[cpf, "Categoria"]) if no_time else categoria_escrita(grupo["categoria"]),
-            "origem": ("Planilha" if no_time else "Planilha (estava fora do arquivo do time: CPF com zero na frente)")
+            "aceita": aceita(r["Aceita Msg"]),
+            "fundidos": int(unificado.group(1)) if unificado else 1,
+            "pontos_planilha": pontos(r["Pontos (até 01/01/2025)"]),
+            "categoria_planilha": texto(r["Categoria"]),
+            "origem": ("Planilha" if cpf in no_arquivo_do_time else "Planilha (estava fora do arquivo do time de 15/10)")
             + ("" if cpf_valido(cpf) else " · CPF inválido"),
-            "linhas": ", ".join(str(l) for l in grupo["linha"]),
-            "obs": " · ".join(sorted({str(o) for o in grupo["Obs"].dropna()})),
+            "linhas": str(r["linha"]),
+            "obs": " · ".join(t for t in (obs, texto(r["Pendências"])) if t),
         }
-    return clientes, invalidos, len(set(com_cpf["cpf"]) - set(do_time.index))
+    return clientes, invalidos, len(set(clientes) - no_arquivo_do_time)
+
+
+def pontos_da_planilha_original() -> int:
+    """Pontos da planilha original como o sistema da Vulto os lia (todas as linhas com CPF, sem zerar ninguém)."""
+    original = pd.read_excel(ORIGINAL, sheet_name="Clientes", dtype=object)
+    return int(original.loc[original["cpf"].map(cpf_11) != "", "Pontos"].map(pontos).sum())
 
 
 # ---------------------------------------------------------------- extrato de pontos
@@ -243,7 +234,7 @@ def montar_extrato(clientes):
             extrato.append(dict(cpf=cpf, quando=CONGELAMENTO, tipo="Saldo da planilha", original=c["pontos_planilha"],
                                 considerado=c["pontos_planilha"], situacao="Mantido",
                                 motivo="Coluna Pontos congelada em 01/01/2025 (soma dos cadastros fundidos)",
-                                origem=f"clientes.xlsx:Clientes linhas {c['linhas']}", ref=""))
+                                origem=f"fidelidade:Clientes linha {c['linhas']}", ref=""))
 
     bug_corrigido = set()
     for mv in movimentos.itertuples():
@@ -288,33 +279,30 @@ def montar_extrato(clientes):
 def resgates_da_planilha(clientes, extrato):
     """Resgate anotado na aba Resgates. Antes de 2025 já está no saldo congelado. De 2025 em diante: se o
     mesmo resgate (CPF e pontos, até 45 dias de diferença) está no sistema, não conta de novo; senão é debitado.
-    Só com o nome: procura um cliente com esse nome; sem um único resultado, fica pendente."""
+    O cliente é o da coluna CPF, preenchida na limpeza de 19/10/2026 (nome completo, CPF digitado errado,
+    atendimentos) e pela varredura_resgates.py (venda do dia na mesma loja com o mesmo desconto); sem CPF, fica pendente."""
     rs = pd.read_excel(PLANILHA, sheet_name="Resgates", dtype=object)
-    por_nome = defaultdict(set)
-    for cpf, c in clientes.items():
-        por_nome[sem_acento(c["nome"])].add(cpf)
     resgates_sistema = defaultdict(list)
     for e in extrato:
         if e["tipo"] == "Resgate":
             resgates_sistema[e["cpf"]].append(e)
 
     novos, pendentes, contagem = [], [], Counter()
-    for linha, r in zip(rs.index + 2, rs.itertuples()):
-        quando = data_cadastro(r.data)
-        qtd = pontos(getattr(r, "_3"))
+    for linha, r in zip(rs.index + 2, rs.to_dict("records")):
+        quando, qtd, anotado = data_cadastro(r["Data"]), pontos(r["Pontos usados"]), texto(r["Cliente (como anotado)"])
         if quando is None or qtd <= 0:
-            pendentes.append((linha, r.cliente, r.data, qtd, "Data ou pontos ilegíveis"))
+            pendentes.append((linha, anotado, r["Data"], qtd, "Data ou pontos ilegíveis"))
             contagem["ilegível"] += 1
             continue
         if quando < date(2025, 1, 1):
             contagem["antes de 2025 (já no saldo congelado)"] += 1
             continue
-        cpf = cpf_11(r.cliente) if re.search(r"\d{3}", str(r.cliente)) else ""
-        if not cpf:
-            achados = por_nome.get(sem_acento(r.cliente), set())
-            cpf = next(iter(achados)) if len(achados) == 1 else ""
+        cpf = cpf_11(r["CPF"])
         if not cpf or cpf not in clientes:
-            pendentes.append((linha, r.cliente, r.data, qtd, "Cliente não identificado (só o nome, ou CPF fora do cadastro)"))
+            nota = texto(r["Pendências"])
+            motivo = ("Nome igual ao de 2 clientes com CPFs diferentes" if nota.startswith("Não identificável")
+                      else "CPF fora do cadastro" if cpf else "Cliente não identificado (só o primeiro nome)")
+            pendentes.append((linha, anotado, r["Data"], qtd, motivo))
             contagem["sem cliente identificado"] += 1
             continue
         momento = datetime(quando.year, quando.month, quando.day, 12, tzinfo=BRASILIA)
@@ -326,8 +314,8 @@ def resgates_da_planilha(clientes, extrato):
             continue
         contagem["só na planilha (debitado)"] += 1
         novos.append(dict(cpf=cpf, quando=momento, tipo="Resgate (só na planilha)", original=-qtd, considerado=-qtd,
-                          situacao="Mantido", motivo=f"Anotado pela loja {r.loja} e não lançado no sistema",
-                          origem=f"clientes.xlsx:Resgates linha {linha}", ref=""))
+                          situacao="Mantido", motivo=f"Anotado pela loja {r['Loja']} e não lançado no sistema",
+                          origem=f"fidelidade:Resgates linha {linha}", ref=""))
     return novos, pendentes, contagem
 
 
@@ -439,9 +427,10 @@ def escrever(clientes, extrato, invalidos, pendentes, resumo, decisoes):
     aba(
         "Pendências",
         ["Origem", "Linha", "Cliente / CPF", "Data", "Pontos", "Por que ficou de fora"],
-        [["clientes.xlsx:Clientes", int(r.linha), f"{r.Nome} · {r.cpf or 'sem CPF'}", str(r["Data Cadastro"] or ""), pontos(r.Pontos),
-          "Sem CPF: não dá para identificar o cliente (pontos só com CPF)"] for _, r in invalidos.iterrows()]
-        + [["clientes.xlsx:Resgates", linha, str(cliente), str(data), qtd, motivo] for linha, cliente, data, qtd, motivo in pendentes],
+        [["fidelidade:Clientes", int(r.linha), f"{r.Nome} · sem CPF", str(r["Data Cadastro"] or ""),
+          pontos(r["Pontos (até 01/01/2025)"]), "Sem CPF: não dá para identificar o cliente (pontos só com CPF)"]
+         for _, r in invalidos.iterrows()]
+        + [["fidelidade:Resgates", linha, str(cliente), str(data), qtd, motivo] for linha, cliente, data, qtd, motivo in pendentes],
         [22, 8, 40, 20, 10, 60],
     )
     wb.save(SAIDA)
@@ -508,13 +497,15 @@ REGRAS = [
     "- 0 pontos: sem categoria",
     "- 1 a 1.500: Bronze",
     "- 1.501 a 5.000: Prata",
-    "- 5.001 a 10.000: Ouro",
-    "- Acima de 10.000: Vip (categoria nova, criada em 15/10/2026)",
+    "- 5.001 a 9.999: Ouro",
+    "- 10.000 ou mais: Vip (categoria nova, criada em 15/10/2026; faixa da planilha de fidelidade de 19/10/2026)",
     "",
     "CADASTRO",
     "- CPF é a chave do cliente e é guardado como texto com 11 dígitos (o zero da frente não pode sumir).",
     "- Dois cadastros com o mesmo CPF são a mesma pessoa: viram um só e os pontos são somados.",
     "- Mensagens (LGPD): se o cliente disse Sim em algum cadastro, aceita; se não disse nada ou disse Não, não aceita.",
+    "- CPF inválido: no próximo login o cliente precisa atualizar os dados (CPF) para continuar usando os benefícios;",
+    "  até lá os pontos ficam guardados.",
 ]
 
 
@@ -550,7 +541,8 @@ def main():
         return sum(e["considerado"] - e["original"] for e in extrato if e["situacao"] == situacao and trecho in e["motivo"])
 
     total, valido, vencidos = soma("total"), soma("valido"), soma("vencidos")
-    sistema = sum(e["original"] for e in extrato if e["origem"].startswith("vulto.db")) + soma("pontos_planilha")
+    sistema = sum(e["original"] for e in extrato if e["origem"].startswith("vulto.db")) + pontos_da_planilha_original()
+    zerados = pontos_da_planilha_original() - soma("pontos_planilha")
     por_categoria = Counter()
     for c in clientes.values():
         por_categoria[c["categoria"]] += c["valido"]
@@ -568,6 +560,7 @@ def main():
         [],
         ["Do saldo que o sistema da Vulto mostraria até o nosso número"],
         ["Planilha congelada + todos os movimentos como estão no sistema", sistema, reais(sistema)],
+        ["Pontos da planilha de quem se cadastrou depois do congelamento (01/01/2025), zerados", -zerados, ""],
         ["Créditos do app em centavos (×100) divididos por 100", efeito("Corrigido", "centavos"), ""],
         ["Correção manual aproximada do bug do app, descartada", efeito("Descartado", "bug do app"), ""],
         ["Créditos de vendas canceladas/estornadas sem o estorno manual", efeito("Descartado", "sem o estorno"), ""],
@@ -586,7 +579,7 @@ def main():
         [],
         ["Clientes"],
         ["Clientes no cadastro (um por CPF, depois da fusão)", len(clientes) - len(so_no_sistema), ""],
-        ["dos quais recuperados (CPF com zero na frente, fora do arquivo do time)", recuperados, ""],
+        ["dos quais estavam fora do 'clientes atualizado' (80 com o zero da frente cortado + 5 CPFs corrigidos)", recuperados, ""],
         ["Só no sistema de pontos, sem cadastro na planilha", len(so_no_sistema), ""],
         ["Clientes com CPF inválido (ficam, marcados na coluna Origem)", sum(not cpf_valido(c) for c in clientes), ""],
         ["  saldo válido deles (incluído no passivo oficial)", sum(c["valido"] for cpf, c in clientes.items() if not cpf_valido(cpf)),
@@ -599,14 +592,14 @@ def main():
     ]
 
     resumo += pendencias(clientes, extrato, por_cliente, reais)
-    decisoes = registro.decisoes(18, 26) + registro.decisoes(40, 41)
+    decisoes = registro.decisoes(18, 26) + registro.decisoes(40, 41) + registro.decisoes(47, 52)
     escrever(clientes, extrato, invalidos, pendentes, resumo, decisoes)
 
     print(f"clientes: {len(clientes) - len(so_no_sistema)} no cadastro ({recuperados} recuperados) + {len(so_no_sistema)} só no sistema")
     print(f"passivo oficial: {valido} pontos = R$ {reais(valido)} | sem vencimento: {total} = R$ {reais(total)} | vencidos {vencidos}")
     print(f"sistema como está: {sistema} | categorias: {dict(qtd_categoria)}")
     print("resumo:")
-    for linha in resumo[8:21]:
+    for linha in resumo[8:22]:
         print("  ", linha)
     print("resgates:", dict(contagem_resgates), "| gravado:", SAIDA)
 
