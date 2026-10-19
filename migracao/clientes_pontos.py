@@ -262,6 +262,9 @@ def montar_extrato(clientes):
             motivo = "Correção manual aproximada do bug do app: substituída pela correção de cada crédito (/100)"
         elif mv.tipo == "C" and estado is not None and estado["tipo"] == "Teste":
             considerado, situacao, motivo = 0, "Descartado", "Crédito de venda de teste"
+        elif mv.tipo == "C" and estado is not None and estado["tipo"] == "Troca":
+            considerado, situacao = 0, "Descartado"
+            motivo = "Troca: os pontos já foram ganhos na compra original (decisão 16)"
         elif mv.tipo == "C" and estado is not None and estado["duplicada_de"] not in ("", None):
             considerado, situacao = 0, "Descartado"
             motivo = f"Pedido lançado duas vezes: o crédito vale só na venda {estado['duplicada_de']}"
@@ -444,6 +447,52 @@ def escrever(clientes, extrato, invalidos, pendentes, resumo, decisoes):
     wb.save(SAIDA)
 
 
+def pendencias(clientes, extrato, por_cliente, reais):
+    """Impacto das decisões ainda em aberto (40 e 41), sem aplicar: quanto o passivo oficial subiria."""
+    legado = sqlite3.connect(LEGADO)
+    compras = pd.read_sql("select id, valor, origem from compras", legado).set_index("id")
+    vendas = pd.read_sql("select id, compra_id, total, canal from vendas", legado).dropna(subset=["compra_id"])
+    centavos = {int(c) for c, t, canal in zip(vendas.compra_id, vendas.total, vendas.canal)
+                if str(canal).strip().lower() in ("app", "online") and re.fullmatch(r"-?\d+", str(t).strip())}
+
+    # 40: compra no site/app creditada uma vez só (o código só dobrava se o canal fosse exatamente "site" ou "app")
+    dobro = []
+    for e in extrato:
+        m = re.match(r"compra (\d+)", e["ref"])
+        if e["tipo"] != "Crédito" or e["situacao"] == "Descartado" or not m or int(m.group(1)) not in compras.index:
+            continue
+        c = compras.loc[int(m.group(1))]
+        if c.origem not in ("site", "app"):
+            continue
+        valor = float(str(c.valor).replace(",", ".")) / (100 if int(m.group(1)) in centavos else 1)
+        if valor >= 1 and 0.8 <= e["considerado"] / valor <= 1.2:
+            dobro.append(dict(e, tipo="Crédito (dobro online)", original=0, situacao="Pendente"))
+
+    # 41: venda manual da Batel com CPF, concluída e não lançada no Vulto+
+    import batel
+    planilha, _ = batel.ler()
+    batel_pts = [dict(cpf=r.cpf, quando=datetime.combine(r.momento.date(), datetime.min.time(), tzinfo=BRASILIA),
+                      tipo="Crédito (venda manual Batel)", original=0, considerado=int(round(r.valor)), situacao="Pendente",
+                      motivo="", origem=f"planilha Batel Nº {r.numero}", ref="")
+                 for r in planilha.itertuples() if r.cpf and r.Status == "Concluída" and r[13] == "Não"]
+
+    def valido_com(extra):
+        mais = defaultdict(list)
+        for e in extra:
+            mais[e["cpf"]].append(e)
+        return sum(saldo_em(por_cliente.get(cpf, []) + mais.get(cpf, []))[1] - c["valido"]
+                   for cpf, c in clientes.items() if cpf in mais) + sum(
+            saldo_em(mais[cpf])[1] for cpf in mais if cpf not in clientes)
+
+    d, b = valido_com(dobro), valido_com(batel_pts)
+    return [
+        [],
+        ["Decisões em aberto (não aplicadas no passivo oficial)", "Pontos a mais no passivo", "R$"],
+        [f"40. Dobro online não creditado ({len(dobro)} compras; {sum(e['considerado'] for e in dobro)} pontos no total)", d, reais(d)],
+        [f"41. Vendas manuais da Batel sem pontos ({len(batel_pts)} vendas com CPF)", b, reais(b)],
+    ]
+
+
 REGRAS = [
     "REGRAS DO PROGRAMA VULTO+ (atualizado em 15/10/2026 — time de tecnologia, PMI Casa Lorenzi)",
     "",
@@ -525,6 +574,7 @@ def main():
         ["Créditos de vendas nunca pagas (aguardando)", efeito("Descartado", "nunca paga"), ""],
         ["Créditos de pedidos lançados duas vezes", efeito("Descartado", "duas vezes"), ""],
         ["Créditos de vendas de teste", efeito("Descartado", "teste"), ""],
+        ["Créditos de trocas (a compra original já ganhou os pontos)", efeito("Descartado", "Troca"), ""],
         ["Resgates anotados só na planilha", sum(e["considerado"] for e in novos), ""],
         ["Resgates maiores que o saldo (o sistema deixava; o saldo para em zero)", faltou_total, ""],
         ["= Saldo sem vencimento", total, reais(total)],
@@ -548,7 +598,8 @@ def main():
         *[[k, v, ""] for k, v in contagem_resgates.items()],
     ]
 
-    decisoes = registro.decisoes(18, 26)
+    resumo += pendencias(clientes, extrato, por_cliente, reais)
+    decisoes = registro.decisoes(18, 26) + registro.decisoes(40, 41)
     escrever(clientes, extrato, invalidos, pendentes, resumo, decisoes)
 
     print(f"clientes: {len(clientes) - len(so_no_sistema)} no cadastro ({recuperados} recuperados) + {len(so_no_sistema)} só no sistema")

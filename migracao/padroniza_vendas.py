@@ -3,7 +3,10 @@
 Lê vulto_padronizado.db (saída de padroniza_valores.py, valores já em reais com vírgula) e grava nele a
 tabela vendas_padronizadas, mais o CSV vendas_padronizadas.csv para abrir no Excel. As tabelas originais
 não mudam. Cada venda diz se entra no faturamento (Sim / Não / Pendente) e o motivo; "Pendente" é o que
-ainda depende de uma decisão do negócio (status vazio, trocas, relançamentos da Batel).
+ainda depende de uma decisão do negócio (hoje nenhuma: as decisões 15, 16 e 17 foram tomadas em 19/10/2026).
+
+Também grava as vendas da Batel feitas sem sistema (BATEL-<Nº>, decisão 17, ver batel.py) e deixa os itens com o
+SKU do catálogo (coluna sku; o código como veio do sistema fica em sku_original). Rode produtos.py antes.
 
 Uso: python migracao/padroniza_vendas.py
 """
@@ -17,7 +20,10 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
+import batel
 import caminhos
+import pandas as pd
+import produtos
 
 BANCO = caminhos.PADRONIZADO
 CSV_SAIDA = os.path.join(caminhos.SAIDA, "vendas_padronizadas.csv")
@@ -67,6 +73,7 @@ VENDEDORES = {
 }
 
 CONTAS_DE_TESTE = {"qa.app@vulto.com.br", "teste@vulto.com.br", "12345678909"}
+PEDIDO_DE_TESTE = re.compile(r"^(S99\d{4}|APP-99\d{5})$")      # séries de QA do site e do app (decisão 11)
 SEM_CLIENTE = {"", "consumidor", "nao informado"}
 
 COLUNAS = [
@@ -127,15 +134,63 @@ def cliente(ref):
     return "Telefone", "", "", digitos
 
 
-def tipo_da_venda(total, obs, ref):
+def tipo_da_venda(total, obs, ref, externo=""):
     texto = (obs or "").lower()
-    if "teste" in texto or (ref or "").strip().lower() in CONTAS_DE_TESTE:
+    if "teste" in texto or (ref or "").strip().lower() in CONTAS_DE_TESTE or PEDIDO_DE_TESTE.match(externo or ""):
         return "Teste"
     if total < 0:
         return "Devolução"
     if texto.startswith("troca"):
         return "Troca"
     return "Venda"
+
+
+def vendas_da_planilha_batel(planilha):
+    """Decisão 17: cada linha da planilha manual da Batel vira uma venda BATEL-<Nº> na data e hora anotadas."""
+    linhas = []
+    for r in planilha.itertuples():
+        cli_tipo, cpf, valido, _ = cliente(r.CPF if isinstance(r.CPF, str) else "")
+        status = {"Concluída": "Concluída", "Cancelada": "Cancelada", "Estornada": "Estornada"}[r.Status]
+        vend = str(r[11]).strip()
+        linhas.append({
+            "id_venda": f"BATEL-{r.numero}", "pedido_externo": "", "data": r.momento.strftime("%d/%m/%Y"),
+            "hora": r.momento.strftime("%H:%M"), "mes": r.momento.strftime("%Y-%m"), "fuso_convertido": "Não",
+            "loja_id": 4, "loja": LOJAS[4], "canal": CANAL_POR_LOJA[4], "canal_original": "planilha manual (PDV fora do ar)",
+            "cliente_tipo": cli_tipo, "cliente_cpf": cpf, "cpf_valido": valido, "cliente_contato": "",
+            "cliente_ref_original": r.CPF if isinstance(r.CPF, str) else "",
+            "vendedor": VENDEDORES[4].get(vend.lower(), vend), "vendedor_original": vend,
+            "pecas": int(r.Qtd), "valor_itens": reais(Decimal(str(r.valor))), "desconto": reais(Decimal(0)),
+            "frete": reais(Decimal(0)), "valor_total": reais(Decimal(str(r.valor))), "status": status,
+            "status_original": r.Status, "tipo": "Venda", "venda_original": "", "duplicada_de": "",
+            "entra_no_faturamento": "Sim" if status == "Concluída" else "Não",
+            "motivo": "Venda manual da Batel (PDV fora do ar): a planilha é a fonte (decisão 17)" if status == "Concluída"
+            else f"Status {status.lower()} (planilha manual da Batel)",
+            "obs": " · ".join(x for x in (str(r[14]) if isinstance(r[14], str) else "", f"Peças: {r[7]}") if x),
+        })
+    return linhas
+
+
+def itens_padronizados(conn, planilha, itens_batel):
+    """Itens com o SKU do catálogo (o código como veio fica em sku_original) e os itens das vendas BATEL-<Nº>."""
+    resolver = produtos.resolvedor()
+    colunas = [c[1] for c in conn.execute("pragma table_info(itens_venda)")]
+    if "sku_original" not in colunas:
+        conn.execute("alter table itens_venda add column sku_original")
+        conn.execute("update itens_venda set sku_original = sku")
+    conn.execute("delete from itens_venda where venda_id like 'BATEL-%'")
+    for iid, original in conn.execute("select id, sku_original from itens_venda").fetchall():
+        sku = resolver(original) or (produtos.GENERICO if original in ("DIVERSO", "PRODUTO SEM CADASTRO") else original)
+        conn.execute("update itens_venda set sku = ? where id = ?", (sku, iid))
+    conn.execute("update itens_venda set descricao = 'Peça não identificada no PDV' where sku = ?", (produtos.GENERICO,))
+    catalogo = pd.read_sql("select * from produtos", conn)
+    novos, nao_achados = batel.itens_com_sku(itens_batel, planilha, catalogo)
+    proximo = conn.execute("select max(id) from itens_venda").fetchone()[0] + 1
+    conn.executemany("insert into itens_venda (id, venda_id, sku, descricao, qtd, preco_unit, sku_original) values (?,?,?,?,?,?,?)",
+                     [(proximo + n, venda, sku, desc, qtd, reais(Decimal(str(preco))), "planilha manual Batel")
+                      for n, (venda, sku, desc, qtd, preco) in enumerate(novos)])
+    conn.commit()
+    sem_sku = conn.execute("select count(*) from itens_venda where sku not in (select sku from produtos)").fetchone()[0]
+    print(f"itens: {len(novos)} peças da planilha da Batel ({len(nao_achados)} sem SKU) | itens sem SKU do catálogo: {sem_sku}")
 
 
 def main():
@@ -151,6 +206,11 @@ def main():
         )
     }
     ids = {v[0] for v in vendas}
+    # Batel (decisão 17): relançamentos da gerente que casam com uma linha da planilha manual
+    planilha_batel, itens_batel = batel.ler()
+    relancadas = [(v[0], float(num(v[6])), re.sub(r"\D", "", cliente(v[4])[1])) for v in vendas
+                  if v[3] == 4 and "gerente" in (v[5] or "").lower()]
+    relancada_de = batel.casar_relancamentos(relancadas, planilha_batel)
     # Pedido do app lançado duas vezes (aguardando -> pago, mesmo valor): fica o último
     ultimo_do_pedido = {}
     for v in vendas:
@@ -161,7 +221,7 @@ def main():
     for vid, externo, canal, loja_id, ref, vendedor, total, desconto, frete, status, criado, obs in vendas:
         momento, convertido = data_local(criado)
         valor_total = num(total)
-        tipo = tipo_da_venda(valor_total, obs, ref)
+        tipo = tipo_da_venda(valor_total, obs, ref, externo)
         status_padrao = STATUS[(status or "").strip().lower()]
         cli_tipo, cpf, valido, contato = cliente(ref)
         vend = (vendedor or "").strip()
@@ -180,12 +240,14 @@ def main():
             entra, motivo = "Não", f"Pedido lançado duas vezes: vale a venda {duplicada_de}"
         elif status_padrao in ("Cancelada", "Estornada", "Chargeback", "Aguardando pagamento"):
             entra, motivo = "Não", f"Status {status_padrao.lower()}"
-        elif relancada:
-            entra, motivo = "Pendente", "Relançamento da planilha manual da Batel (PDV fora do ar em mar/2026)"
-        elif status_padrao == "Sem status":
-            entra, motivo = "Pendente", "Loja física sem status: pago?"
+        elif relancada and vid in relancada_de:
+            entra, motivo = "Não", f"Relançamento da venda manual BATEL-{relancada_de[vid]}: conta pela planilha (decisão 17)"
         elif tipo == "Troca":
-            entra, motivo = "Pendente", "Troca lançada como venda nova"
+            entra, motivo = "Não", "Troca: a compra original já entrou no faturamento (decisão 16)"
+        elif relancada:
+            entra, motivo = "Sim", "Relançamento sem venda correspondente na planilha manual da Batel: venda real (decisão 17)"
+        elif status_padrao == "Sem status":
+            entra, motivo = "Sim", "Loja física sem status: venda de balcão, considerada paga (decisão 15)"
         elif tipo == "Devolução":
             entra, motivo = "Sim", "Devolução: entra negativa no mês em que aconteceu"
         else:
@@ -224,6 +286,9 @@ def main():
             "motivo": motivo,
             "obs": obs or "",
         })
+
+    linhas += vendas_da_planilha_batel(planilha_batel)
+    itens_padronizados(conn, planilha_batel, itens_batel)
 
     conn.execute("drop table if exists vendas_padronizadas")
     conn.execute(f"create table vendas_padronizadas ({', '.join(COLUNAS)}, primary key (id_venda))")
