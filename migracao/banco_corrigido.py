@@ -19,7 +19,11 @@ O que muda em cada tabela
 - estoque: a posição oficial em 01/10/2026 (contagem física levada até a virada); as lojas 5 e 6 deixam de ter estoque.
 - entradas_estoque: SKU do catálogo, data AAAA-MM-DD, custo com vírgula, NF repetida conta uma vez e entram os
   recebimentos que a loja não anotou.
-- config: valor_ponto = 0.05.  lojas e funcionarios: sem mudança.
+- funcionarios: uma conta por pessoa, com a matrícula nova em codigo (VLT-0101), o papel da plataforma em perfil
+  (Lojista, Operador, Administrador), o cargo fora do nome e senha vazia (nenhuma senha antiga migra). Não migram a
+  conta de teste e o admin desativado; as contas de função (gerente da Batel, CD, estagiário) ficam desativadas até
+  a Vulto dizer quem as usa.
+- config: valor_ponto = 0.05.  lojas: sem mudança.
 
 Uso: python migracao/banco_corrigido.py   (depois do carregar.py; o carregar.py já chama no final)
 """
@@ -49,6 +53,18 @@ VENCIMENTO = "2026-09-30 23:59:59"
 LOJA_DO_LOCAL = {"Pinheiros": 1, "Eldorado": 2, "Savassi": 3, "Batel": 4, "CD Cajamar": 7}
 TIPO_PONTO = {"Crédito": "C", "Resgate": "D", "Estorno": "E", "Ajuste": "AJ", "Saldo da planilha": "AJ",
               "Resgate (só na planilha)": "D"}
+# Decisões 56 a 59: matrícula nova por pessoa. A chave é o id do vulto.db (o crachá 0102 era de duas pessoas); o nome
+# só aparece quando muda (as vendas continuam ligadas pelo nome). None = não migra (decisão 58).
+FUNCIONARIOS = {
+    1: ("VLT-0101", None), 2: ("VLT-0102", None), 3: ("VLT-0104", None), 4: ("VLT-0103", None),
+    5: ("VLT-0100", None), 6: ("VLT-0201", None), 7: ("VLT-0202", None), 8: ("VLT-0203", None),
+    9: ("VLT-0200", None), 10: ("VLT-0301", None), 11: ("VLT-0302", None), 12: ("VLT-0303", None),
+    13: ("VLT-0300", None), 14: ("VLT-0401", None), 15: ("VLT-0402", None), 16: ("VLT-0403", None),
+    17: ("VLT-0400", "Gerente Batel"), 18: ("VLT-0701", "Operador CD Cajamar"), 19: ("VLT-0001", "Diego"),
+    20: ("VLT-0002", "Paula"), 21: ("VLT-0003", "Marina"), 22: None, 23: ("VLT-0105", "Estagiário Pinheiros"), 24: None,
+}
+CONTA_DE_FUNCAO = {17, 18, 23}  # desativada até a Vulto informar o nome de quem usa (decisão 58)
+PAPEL = {"vendedor": "Lojista", "gerente": "Lojista", "operador": "Operador", "admin": "Administrador"}  # decisão 57
 
 
 def valor(texto):
@@ -178,6 +194,21 @@ def tabela_pontos(banco):
 # ---------------------------------------------------------------- estoque
 
 
+def tabela_funcionarios(banco):
+    """Uma conta por pessoa com a matrícula nova e o papel da plataforma; nenhuma senha antiga migra (decisões 56 a 59)."""
+    f = pd.read_sql("select * from funcionarios", banco)
+    if set(f.id) != set(FUNCIONARIOS):
+        sys.exit(f"funcionarios: ids sem matrícula definida em FUNCIONARIOS: {sorted(set(f.id) ^ set(FUNCIONARIOS))}")
+    linhas = []
+    for r in f.itertuples():
+        if FUNCIONARIOS[r.id] is None:
+            continue
+        matricula, nome = FUNCIONARIOS[r.id]
+        linhas.append(dict(id=r.id, codigo=matricula, nome=nome or r.nome, loja_id=r.loja_id, senha=None,
+                           perfil=PAPEL[r.perfil], ativo=0 if r.id in CONTA_DE_FUNCAO else r.ativo))
+    return pd.DataFrame(linhas)
+
+
 def tabela_estoque(banco):
     e = pd.read_sql("select * from estoque_01_10", banco)
     linhas = [dict(sku=r["sku"], loja_id=loja, qtd=int(r[col]), atualizado_em=CORTE)
@@ -233,8 +264,9 @@ def main():
     entradas, nf_repetidas, recebimentos = tabela_entradas(banco)
     config = pd.read_sql("select * from config", banco)
     config.loc[config.chave == "valor_ponto", "valor"] = "0.05"                     # 100 pontos = R$ 5,00
+    funcionarios = tabela_funcionarios(banco)
     novas = {"vendas": vendas, "itens_venda": itens, "compras": compras, "pontos_mov": pontos, "estoque": estoque,
-             "entradas_estoque": entradas, "config": config}
+             "entradas_estoque": entradas, "config": config, "funcionarios": funcionarios}
 
     if os.path.exists(DESTINO):
         os.remove(DESTINO)
@@ -242,9 +274,8 @@ def main():
     for nome, sql in banco.execute(f"select name, sql from sqlite_master where type = 'table' and name in "
                                    f"({', '.join('?' * len(ORIGINAIS))})", ORIGINAIS).fetchall():
         destino.execute(sql)                                                       # mesma estrutura do original
-    for nome in ("lojas", "funcionarios"):
-        linhas = banco.execute(f"select * from {nome}").fetchall()
-        destino.executemany(f"insert into {nome} values ({', '.join('?' * len(linhas[0]))})", linhas)
+    linhas = banco.execute("select * from lojas").fetchall()
+    destino.executemany(f"insert into lojas values ({', '.join('?' * len(linhas[0]))})", linhas)
     for nome, df in novas.items():
         colunas = [c[1] for c in destino.execute(f"pragma table_info({nome})")]
         destino.executemany(f"insert into {nome} ({', '.join(colunas)}) values ({', '.join('?' * len(colunas))})",
@@ -297,6 +328,13 @@ def conferir(banco, destino):
     fora = {s for (s,) in destino.execute("select distinct sku from itens_venda union select distinct sku from estoque")} - catalogo
     if fora:
         erros.append(f"SKU fora do catálogo: {sorted(fora)[:5]}")
+    repetidas = destino.execute("select count(*) from (select codigo from funcionarios group by codigo having count(*) > 1)").fetchone()[0]
+    if repetidas or destino.execute("select count(*) from funcionarios where senha is not null").fetchone()[0]:
+        erros.append("funcionarios: matrícula repetida ou senha antiga migrada")
+    nomes = {n for (n,) in destino.execute("select nome from funcionarios")} | {"Rafael Lima ou Rafaela Couto"}  # decisão 13
+    sem_cadastro = {v for (v,) in destino.execute("select distinct vendedor from vendas where vendedor is not null")} - nomes
+    if sem_cadastro:
+        erros.append(f"vendedor sem cadastro em funcionarios: {sorted(sem_cadastro)[:5]}")
     if erros:
         sys.exit("vulto_corrigido.db: " + "; ".join(erros))
     print(f"  conferência ok: faturamento R$ {fat:,.2f}, estoque {pecas} peças e passivo {sum(saldo.values())} pontos "
