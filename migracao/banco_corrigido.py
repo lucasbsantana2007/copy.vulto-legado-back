@@ -224,7 +224,8 @@ def tabela_entradas(banco):
     dia = lambda s: next((datetime.strptime(str(s).strip(), f).strftime("%Y-%m-%d")       # noqa: E731
                           for f in ("%d/%m/%Y", "%Y-%m-%d", "%d/%m/%y") if _bate(s, f)), None)
     e["data"] = e.data.map(dia)
-    e["custo_unit"] = e.custo_unit.map(lambda x: reais(valor(x)) if x not in (None, "") else None)
+    # vazio no original continua vazio (o pandas lê como NaN, que viraria o texto "NaN")
+    e["custo_unit"] = e.custo_unit.map(lambda x: reais(valor(x)) if pd.notna(x) and str(x).strip() else None)
     receb = e.qtd.notna() & e.fornecedor.fillna("").str.strip().str.upper().isin(["", "CD"]) & (e.loja_id != 7)
     e.loc[receb, "fornecedor"] = e.loc[receb, "obs"].map(
         lambda o: next((n.title() for n in ("pinheiros", "eldorado", "savassi", "batel") if f"veio da {n}" in str(o).lower()), "CD"))
@@ -321,6 +322,12 @@ def conferir(banco, destino):
     dif = [c for c in set(saldo) | set(valido) if int(saldo.get(c, 0)) != int(valido.get(c, 0))]
     if dif:
         erros.append(f"pontos_mov não fecha com o saldo válido em {len(dif)} CPFs (ex.: {dif[:3]})")
+    for (tabela,) in destino.execute(f"select name from sqlite_master where type = 'table' and name in ({', '.join('?' * len(ORIGINAIS))})",
+                                     ORIGINAIS).fetchall():
+        for coluna in [c[1] for c in destino.execute(f"pragma table_info({tabela})")]:
+            n = destino.execute(f"select count(*) from {tabela} where lower({coluna}) in ('nan', 'none', 'null')").fetchone()[0]
+            if n:
+                erros.append(f"{tabela}.{coluna}: {n} valores vazios gravados como texto ('NaN', 'None')")
     orfaos = destino.execute("select count(*) from itens_venda where venda_id not in (select id from vendas)").fetchone()[0]
     if orfaos:
         erros.append(f"{orfaos} itens sem venda")
