@@ -79,7 +79,7 @@ def conferir(t):
     checa(set(cl.categoria) <= CATEGORIAS, f"clientes_padronizados: categoria fora do padrão {set(cl.categoria) - CATEGORIAS}")
     checa((pd.to_numeric(cl.saldo_valido_01_10_2026) >= 0).all(), "clientes_padronizados: saldo negativo")
     dominios = cl.e_mail.dropna().astype(str).str.rpartition("@")[2]
-    checa(not dominios.isin(DOMINIOS).any(), "clientes_padronizados: e-mail com domínio digitado errado (decisão 60)")
+    checa(not dominios.isin(DOMINIOS).any(), "clientes_padronizados: e-mail com domínio digitado errado (decisão 61)")
     checa(set(t["extrato_pontos"].cpf) <= set(cl.cpf), "extrato_pontos: movimento de CPF que não está no cadastro")
 
     # ---------------------------------------------------------------- estoque

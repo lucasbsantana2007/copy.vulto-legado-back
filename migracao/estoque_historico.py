@@ -106,7 +106,7 @@ def entradas_ate_contagem(conn, local_da_contagem, resolver):
 
 def main():
     catalogo, cores = carregar_catalogo()
-    contado, _, _ = contagens(catalogo)
+    contado, avaria_pinheiros, _ = contagens(catalogo)
     depois, _ = movimentos(Normalizador(catalogo, cores))             # da contagem até 30/09: os do número oficial
     dia_contagem = {local: v[2] for local, v in LOCAIS.items()}
     conn = sqlite3.connect(caminhos.PADRONIZADO)
@@ -118,26 +118,35 @@ def main():
     pos_contagem = defaultdict(list)
     for m in depois:
         pos_contagem[(m[0], m[2])].append(m)
-    chaves = set(por_chave) | set(pos_contagem) | {(local, sku) for local, linhas in contado.items() for sku in linhas}
+    chaves = set(por_chave) | set(pos_contagem) | {(local, sku) for local, linhas in contado.items() for sku in linhas} \
+        | {("Pinheiros", sku) for sku in avaria_pinheiros}
 
     linhas, resumo = [], defaultdict(lambda: defaultdict(int))
     for local, sku in sorted(chaves):
         movs = sorted(por_chave.get((local, sku), []), key=lambda m: (m[1], m[3] < 0))
-        qtd_contada = contado[local].get(sku, {}).get("qtd", 0)
+        qtd_contada = contado[local].get(sku, {}).get("qtd", 0)              # estoque vendável contado
+        # a peça com avaria estava na loja no dia da contagem: o histórico chega no contado físico e a avaria sai
+        # em seguida (Pinheiros: contada; Eldorado, Savassi e Batel: estimada, decisão 54)
+        avaria = avaria_pinheiros.get(sku, 0) if local == "Pinheiros" else contado[local].get(sku, {}).get("avaria_estimada", 0)
+        qtd_fisica = qtd_contada + avaria
         acumulado, menor = 0, 0
         for m in movs:
             acumulado += m[3]
             menor = min(menor, acumulado)
-        pela_contagem = qtd_contada - acumulado                          # saldo inicial que fecha com a contagem
+        pela_contagem = qtd_fisica - acumulado                           # saldo inicial que fecha com a contagem
         inicial = max(pela_contagem, -menor, 0)
-        ajuste = qtd_contada - (inicial + acumulado)                    # ≤ 0: o que o sistema não registrou
+        ajuste = qtd_fisica - (inicial + acumulado)                     # ≤ 0: o que o sistema não registrou
         serie = []
         if inicial:
             serie.append((INICIO, inicial, "Saldo inicial (reconstruído)", "decisão 44"))
         serie += [(m[1], m[3], m[4], m[5]) for m in movs]
         if ajuste:
             serie.append((dia_contagem[local], ajuste, "Ajuste de inventário (contagem física)",
-                          f"contado {qtd_contada}; os movimentos registrados levariam a {qtd_contada - ajuste}"))
+                          f"contado {qtd_fisica}; os movimentos registrados levariam a {qtd_fisica - ajuste}"))
+        if avaria:
+            serie.append((dia_contagem[local], -avaria,
+                          "Avaria (contada na Pinheiros)" if local == "Pinheiros" else "Avaria estimada (decisão 54)",
+                          "fora do estoque vendável"))
         # da contagem a 30/09: se a peça vendeu mais do que foi contado, o oficial para em zero (decisão 36); o ajuste
         # entra no primeiro dia em que o saldo ficaria negativo, para o histórico nunca ter estoque negativo
         corrente, zerado = qtd_contada, False
@@ -160,6 +169,7 @@ def main():
         r["saldo_inicial"] += inicial
         r["ajuste_inventario"] += ajuste
         r["skus_com_ajuste"] += ajuste != 0
+        r["avaria"] += avaria
         r["estoque_01_10"] += max(final, 0)
 
     historico = pd.DataFrame(linhas)

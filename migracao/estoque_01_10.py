@@ -114,16 +114,39 @@ class Normalizador:
 # ---------------------------------------------------------------- contagens
 
 
+def avaria_estimada():
+    """Decisão 54 (decisão 13 da aba DECISÕES da contagem, 19/10/2026): Eldorado, Savassi e Batel não separaram a
+    avaria; aplica-se a taxa real da Pinheiros (3,3%), com o mesmo peso por SKU, limitada ao estoque da loja. A aba
+    AVARIA ESTIMADA traz a avaria de cada SKU por loja; ela sai do estoque vendável (como a da Pinheiros)."""
+    wb = load_workbook(CONTAGEM_TIME, data_only=True)
+    if "AVARIA ESTIMADA" not in wb.sheetnames:
+        return {}
+    linhas = list(wb["AVARIA ESTIMADA"].iter_rows(values_only=True))
+    inicio = next(n for n, linha in enumerate(linhas) if linha and linha[0] == "SKU")
+    cabecalho = linhas[inicio]
+    colunas = {local: cabecalho.index(f"{local.upper()} – avaria est.") for local in ("Eldorado", "Savassi", "Batel")}
+    estimada = {local: {} for local in colunas}
+    for linha in linhas[inicio + 1:]:
+        if not linha or not str(linha[0] or "").upper().startswith("VLT-"):   # pula a linha TOTAL
+            continue
+        for local, c in colunas.items():
+            if int(linha[c] or 0):
+                estimada[local][canonico(linha[0], linha[1])] = int(linha[c])
+    return estimada
+
+
 def contagens(catalogo):
     wb = load_workbook(CONTAGEM_TIME, data_only=True)
     contado = {}
     for local, (_, aba, _, _) in LOCAIS.items():
         linhas = {}
+        cabecalho = [str(c or "").strip().upper() for c in next(wb[aba].iter_rows(min_row=1, max_row=1, values_only=True))]
+        col_obs = cabecalho.index("OBS")                     # a aba ganhou colunas de avaria depois da OBS em 19/10
         for linha in wb[aba].iter_rows(min_row=2, values_only=True):
             sku, codigo, qtd = linha[0], linha[1], linha[2]
             if not sku:
                 continue
-            obs = str(linha[-1] or "") if local != "Savassi" else "ESTOQUE SIMULADO"
+            obs = str(linha[col_obs] or "") if local != "Savassi" else "ESTOQUE SIMULADO"
             situacao = "Contado"
             if local == "Savassi":
                 situacao = "Estimado (rateio por modelo)"
@@ -131,6 +154,14 @@ def contagens(catalogo):
                 situacao = "Estimado (imputado)"
             linhas[canonico(sku, codigo)] = dict(qtd=int(qtd or 0), situacao=situacao, obs=obs, sku_time=sku)
         contado[local] = linhas
+    # avaria estimada (decisão 54): sai do contado, que passa a ser o estoque vendável
+    estimada = avaria_estimada()
+    for local, por_sku in estimada.items():
+        for sku, qtd in por_sku.items():
+            c = contado[local].setdefault(sku, dict(qtd=0, situacao="Contado", obs="", sku_time=""))
+            c["qtd"] -= qtd
+            c["avaria_estimada"] = qtd
+            c["situacao"] += f" · avaria estimada: {qtd} (decisão 54)"
     avaria = {canonico(l[0], l[1]): int(l[2] or 0) for l in wb["AVARIA PINHEIROS"].iter_rows(min_row=2, values_only=True) if l[0]}
     # Savassi: o que a loja contou de verdade (por modelo), na contagem original da Vulto
     original = load_workbook(CONTAGEM_ORIGINAL, data_only=True)
@@ -138,6 +169,12 @@ def contagens(catalogo):
     for modelo, descricao, qtd in original["SAVASSI (por modelo)"].iter_rows(min_row=2, values_only=True):
         if modelo:
             savassi_modelo[str(modelo).strip().upper()] = (descricao, int(qtd or 0))
+    # a avaria estimada da Savassi também sai do número oficial por modelo
+    for sku, qtd in estimada.get("Savassi", {}).items():
+        modelo = "-".join(sku.split("-")[1:3])
+        if modelo in savassi_modelo:
+            descricao, contado_modelo = savassi_modelo[modelo]
+            savassi_modelo[modelo] = (descricao, contado_modelo - qtd)
     return contado, avaria, savassi_modelo
 
 
@@ -315,22 +352,25 @@ def escrever(contado, avaria, savassi_modelo, catalogo_can, movs, pendentes):
         vendas_modelo["-".join(sku.split("-")[1:3])] += sum(m.values())
     linhas_sav = [[modelo, desc, qtd, vendas_modelo.get(modelo, 0), max(qtd + vendas_modelo.get(modelo, 0), 0)]
                   for modelo, (desc, qtd) in sorted(savassi_modelo.items())]
-    aba("Savassi por modelo", ["Modelo", "Descrição", "Contado (por modelo)", "Movimentos 29–30/09", "Estoque 01/10/2026 (oficial)"],
+    aba("Savassi por modelo", ["Modelo", "Descrição", "Contado por modelo (sem a avaria estimada)", "Movimentos 29–30/09", "Estoque 01/10/2026 (oficial)"],
         linhas_sav, [12, 40, 14, 14, 16])
 
     # Por produto: SKU × local
     locais = list(LOCAIS)
-    aba("Por produto", ["SKU", "Código CD", "Produto", "Coleção", "Status"] + locais + ["Total lojas + CD", "Avaria (Pinheiros, fora)"],
+    aba("Por produto", ["SKU", "Código CD", "Produto", "Coleção", "Status"] + locais
+        + ["Total lojas + CD", "Avaria (Pinheiros, fora)", "Avaria estimada (Eldorado, Savassi e Batel, fora)"],
         [[sku, catalogo_can.get(sku, {}).get("codigo", ""), catalogo_can.get(sku, {}).get("produto", ""),
           catalogo_can.get(sku, {}).get("colecao", ""), catalogo_can.get(sku, {}).get("status", "")]
-         + [final[sku].get(l, 0) for l in locais] + [sum(final[sku].values()), avaria.get(sku, 0)] for sku in sorted(final)],
-        [22, 12, 34, 22, 18] + [11] * len(locais) + [12, 12])
+         + [final[sku].get(l, 0) for l in locais] + [sum(final[sku].values()), avaria.get(sku, 0),
+                                                     sum(contado[l].get(sku, {}).get("avaria_estimada", 0) for l in locais)]
+         for sku in sorted(final)],
+        [22, 12, 34, 22, 18] + [11] * len(locais) + [12, 12, 14])
 
     aba("Movimentos", ["Local", "Dia", "SKU", "Quantidade", "Tipo", "Origem"],
         [[l, d, s, q, t, o] for l, d, s, q, t, o in sorted(movs, key=lambda m: (m[0], m[1]))], [12, 11, 22, 10, 34, 24])
     aba("Pendências", ["Local", "Dia", "SKU como veio", "Quantidade", "Tipo", "Origem"],
         [list(p) for p in pendentes], [12, 11, 26, 10, 34, 24])
-    aba("Decisões", registro.COLUNAS, registro.decisoes(27, 37), registro.LARGURAS)
+    aba("Decisões", registro.COLUNAS, registro.decisoes(27, 37) + registro.decisoes(54, 54), registro.LARGURAS)
     for linha in wb["Decisões"].iter_rows(min_row=2):
         for c in linha:
             c.alignment = Alignment(wrap_text=True, vertical="top")
@@ -352,8 +392,10 @@ def escrever(contado, avaria, savassi_modelo, catalogo_can, movs, pendentes):
     ws.cell(ws.max_row, 1).font = Font(bold=True)
     ws.append([])
     oficial_sav = sum(l[4] for l in linhas_sav)
-    ws.append(["Savassi oficial (por modelo, o que foi contado)", "", "", sum(q for _, q in savassi_modelo.values()), "", "", "", oficial_sav])
+    ws.append(["Savassi oficial (por modelo, o que foi contado, sem a avaria estimada)", "", "", sum(q for _, q in savassi_modelo.values()), "", "", "", oficial_sav])
     ws.append(["Avaria da Pinheiros (fora do estoque vendável)", "", "", sum(avaria.values())])
+    ws.append(["Avaria estimada de Eldorado, Savassi e Batel (fora do estoque vendável, decisão 54)", "", "",
+               sum(c.get("avaria_estimada", 0) for linhas in contado.values() for c in linhas.values())])
     ws.append(["Movimentos sem SKU reconhecido (ver Pendências)", "", "", len(pendentes)])
     for i, w in enumerate([44, 12, 50, 10, 14, 14, 10, 14, 16], 1):
         ws.column_dimensions[get_column_letter(i)].width = w
