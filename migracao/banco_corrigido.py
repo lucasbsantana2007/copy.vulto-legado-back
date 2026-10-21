@@ -20,7 +20,7 @@ O que muda em cada tabela
 - estoque: a posição oficial em 01/10/2026 (contagem física levada até a virada); as lojas 5 e 6 deixam de ter estoque.
 - entradas_estoque: SKU do catálogo, data AAAA-MM-DD, custo com vírgula, NF repetida conta uma vez e entram os
   recebimentos que a loja não anotou. O envio por transferência (sem quantidade no original) ganha a quantidade
-  escrita no texto, negativa: é saída de quem mandou.
+  escrita no texto, negativa: é saída de quem mandou. Fornecedor com o nome do catálogo.
 - funcionarios: uma conta por pessoa, com a matrícula nova em codigo (VLT-0101), o papel da plataforma em perfil
   (Lojista, Operador, Administrador), o cargo fora do nome e senha vazia (nenhuma senha antiga migra). Não migram a
   conta de teste e o admin desativado; as contas de função (gerente da Batel, CD, estagiário) ficam desativadas até
@@ -34,6 +34,7 @@ import os
 import re
 import sqlite3
 import sys
+import unicodedata
 from collections import defaultdict
 from datetime import datetime
 from decimal import Decimal
@@ -66,8 +67,20 @@ FUNCIONARIOS = {
     17: ("VLT-0400", "Gerente Batel"), 18: ("VLT-0701", "Operador CD Cajamar"), 19: ("VLT-0001", "Diego"),
     20: ("VLT-0002", "Paula"), 21: ("VLT-0003", "Marina"), 22: None, 23: ("VLT-0105", "Estagiário Pinheiros"), 24: None,
 }
+# Decisão 61: fornecedor das compras pelo nome do catálogo ("MALHARIA SERRA AZUL LTDA", "serra azul" -> Malharia Serra Azul)
+FORNECEDORES = {"serra azul": "Malharia Serra Azul", "rio claro": "Jeans Rio Claro", "r. claro": "Jeans Rio Claro",
+                "pequi": "Atelier Pequi", "aurora": "Confecções Aurora", "horizonte": "Têxtil Horizonte",
+                "ventura": "Acessórios Ventura"}
+ORIGEM_TRANSFERENCIA = {"CD", "Pinheiros", "Eldorado", "Savassi", "Batel"}
 CONTA_DE_FUNCAO = {17, 18, 23}  # desativada até a Vulto informar o nome de quem usa (decisão 58)
 PAPEL = {"vendedor": "Lojista", "gerente": "Lojista", "operador": "Operador", "admin": "Administrador"}  # decisão 57
+
+
+def fornecedor_padrao(nome):
+    if not isinstance(nome, str) or not nome.strip():
+        return None
+    chave = unicodedata.normalize("NFKD", nome).encode("ascii", "ignore").decode().lower()
+    return next((padrao for trecho, padrao in FORNECEDORES.items() if trecho in chave), nome.strip())
 
 
 def valor(texto):
@@ -234,6 +247,7 @@ def tabela_entradas(banco):
     receb = e.qtd.notna() & e.fornecedor.fillna("").str.strip().str.upper().isin(["", "CD"]) & (e.loja_id != 7)
     e.loc[receb, "fornecedor"] = e.loc[receb, "obs"].map(
         lambda o: next((n.title() for n in ("pinheiros", "eldorado", "savassi", "batel") if f"veio da {n}" in str(o).lower()), "CD"))
+    e["fornecedor"] = e.fornecedor.map(fornecedor_padrao)
     compra = (e.loja_id == 7) & e.usuario.isin(["marina.compras", "joao.fiscal"]) & e.nf.notna()
     repetida = compra & e.duplicated(subset=["sku", "qtd", "nf"], keep="first") & compra.where(compra, False)
     e = e[~repetida].copy()
@@ -345,6 +359,10 @@ def conferir(banco, destino):
             n = destino.execute(f"select count(*) from {tabela} where lower({coluna}) in ('nan', 'none', 'null')").fetchone()[0]
             if n:
                 erros.append(f"{tabela}.{coluna}: {n} valores vazios gravados como texto ('NaN', 'None')")
+    conhecidos = {f for (f,) in banco.execute("select distinct fornecedor from produtos_padronizados") if f} | ORIGEM_TRANSFERENCIA
+    outros = {f for (f,) in destino.execute("select distinct fornecedor from entradas_estoque where fornecedor is not null")} - conhecidos
+    if outros:
+        erros.append(f"entradas_estoque: fornecedor fora do catálogo {sorted(outros)[:5]}")
     sem_qtd = destino.execute("select count(*) from entradas_estoque where qtd is null or qtd = 0").fetchone()[0]
     if sem_qtd:
         erros.append(f"entradas_estoque: {sem_qtd} linhas sem quantidade")
