@@ -53,6 +53,7 @@ INICIO_VALIDADE = datetime(2025, 10, 1, tzinfo=BRASILIA)
 CONGELAMENTO = datetime(2025, 1, 1, tzinfo=BRASILIA)  # a coluna Pontos da planilha foi congelada aqui
 VALOR_PONTO = 0.05  # 100 pontos = R$ 5 (regra desde mar/2025)
 FAIXAS = ((10000, "Vip"), (5001, "Ouro"), (1501, "Prata"), (1, "Bronze"), (0, "Sem categoria"))
+DOMINIOS = {"gmial.com": "gmail.com", "hotmail.con": "hotmail.com", "uol.con.br": "uol.com.br"}  # decisão 60
 
 LOJAS = {
     "site": "Site", "ecommerce": "Site", "app": "App", "pinheiros": "Pinheiros", "eldorado": "Eldorado",
@@ -149,6 +150,12 @@ def sem_acento(texto: str) -> str:
     return " ".join(unicodedata.normalize("NFKD", str(texto)).encode("ascii", "ignore").decode().lower().split())
 
 
+def email_sem_erro(email: str) -> str:
+    """Domínio digitado errado (decisão 60): 'ana@gmial.com' -> 'ana@gmail.com'."""
+    usuario, _, dominio = email.rpartition("@")
+    return f"{usuario}@{DOMINIOS[dominio]}" if dominio in DOMINIOS else email
+
+
 def aceita(valor) -> str:
     """A planilha limpa já traz Sim / Não / Não informado; só o Sim registrado vale (LGPD)."""
     return "Sim" if str(valor).strip().lower() == "sim" else "Não"
@@ -180,13 +187,13 @@ def montar_clientes():
 
     clientes = {}
     for r in planilha[planilha["cpf"] != ""].to_dict("records"):
-        cpf, obs = r["cpf"], texto(r["Obs"])
+        cpf, obs, email = r["cpf"], texto(r["Obs"]), texto(r["E-mail"]).lower()
         unificado = re.search(r"Cadastro unificado \((\d+) linhas: ([\d, ]+)\)", obs)
         loja = texto(r["Loja Cadastro"]).lower()
         clientes[cpf] = {
             "cpf": cpf,
             "nome": texto(r["Nome"]),
-            "email": texto(r["E-mail"]).lower(),
+            "email": email_sem_erro(email),
             "telefone": telefone(r["Telefone"]),
             "cadastro": data_cadastro(r["Data Cadastro"]),
             "loja": LOJAS.get(loja, loja.title()),
@@ -197,7 +204,8 @@ def montar_clientes():
             "origem": ("Planilha" if cpf in no_arquivo_do_time else "Planilha (estava fora do arquivo do time de 15/10)")
             + ("" if cpf_valido(cpf) else " · CPF inválido"),
             "linhas": str(r["linha"]),
-            "obs": " · ".join(t for t in (obs, texto(r["Pendências"])) if t),
+            "obs": " · ".join(t for t in (obs, texto(r["Pendências"]),
+                                          f"e-mail corrigido (era {email})" if email_sem_erro(email) != email else "") if t),
         }
     return clientes, invalidos, len(set(clientes) - no_arquivo_do_time)
 

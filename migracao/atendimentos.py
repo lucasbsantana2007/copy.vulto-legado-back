@@ -45,9 +45,21 @@ def main():
     telefones = clientes.dropna(subset=["Telefone"]).drop_duplicates("Telefone", keep=False)
     por_tel = dict(zip(telefones["Telefone"].map(digitos), telefones["CPF"]))
     conn = sqlite3.connect(caminhos.PADRONIZADO)
-    vendas = pd.read_sql("select id_venda, pedido_externo, data, loja_id, cliente_cpf from vendas_padronizadas", conn)
+    todas = pd.read_sql("select id_venda, pedido_externo, data, loja_id, cliente_cpf, tipo, duplicada_de, motivo "
+                        "from vendas_padronizadas", conn)
+    relancada = todas.motivo.fillna("").str.extract(r"^Relançamento da venda manual (BATEL-\d+)")[0]
+    # só as vendas que ficam no banco corrigido: o pedido lançado duas vezes liga à gravação que vale (decisão 10)
+    vendas = todas[(todas.tipo != "Teste") & (todas.duplicada_de.fillna("").astype(str) == "") & relancada.isna()].copy()
     vendas["chave"] = [p if p else str(i) for p, i in zip(vendas.pedido_externo, vendas.id_venda)]
     vendas = vendas.drop_duplicates("chave").set_index("chave")
+    # o número de um relançamento da Batel liga à venda da planilha que vale (decisão 17); o CPF anotado no
+    # relançamento identifica o cliente quando a planilha não tem
+    da_planilha = vendas.set_index(vendas.id_venda.astype(str))
+    for numero, batel_id, cpf in zip(todas.id_venda[relancada.notna()].astype(str), relancada.dropna(),
+                                     todas.cliente_cpf[relancada.notna()]):
+        venda = da_planilha.loc[batel_id].copy()
+        venda["cliente_cpf"] = venda.cliente_cpf or cpf
+        vendas.loc[numero] = venda
 
     linhas = []
     for r in a.itertuples():

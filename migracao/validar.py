@@ -11,6 +11,7 @@ import sys
 import pandas as pd
 
 import caminhos
+from clientes_pontos import DOMINIOS
 
 # tabelas originais da Vulto: nunca mudam (são o "sistema da Vulto" da comparação)
 ORIGINAIS = {"vendas": 18598, "itens_venda": 31110, "compras": 14948, "pontos_mov": 12127, "estoque": 7130,
@@ -77,6 +78,8 @@ def conferir(t):
     checa(cl.cpf.astype(str).str.fullmatch(r"\d{3}\.\d{3}\.\d{3}-\d{2}").all(), "clientes_padronizados: CPF fora do formato")
     checa(set(cl.categoria) <= CATEGORIAS, f"clientes_padronizados: categoria fora do padrão {set(cl.categoria) - CATEGORIAS}")
     checa((pd.to_numeric(cl.saldo_valido_01_10_2026) >= 0).all(), "clientes_padronizados: saldo negativo")
+    dominios = cl.e_mail.dropna().astype(str).str.rpartition("@")[2]
+    checa(not dominios.isin(DOMINIOS).any(), "clientes_padronizados: e-mail com domínio digitado errado (decisão 60)")
     checa(set(t["extrato_pontos"].cpf) <= set(cl.cpf), "extrato_pontos: movimento de CPF que não está no cadastro")
 
     # ---------------------------------------------------------------- estoque
@@ -97,6 +100,10 @@ def conferir(t):
     checa(a.id.is_unique, "atendimentos_padronizados: id repetido")
     ligadas = a[a.id_venda.astype(str) != ""]
     checa(set(ligadas.id_venda.astype(str)) <= ids, "atendimentos_padronizados: venda ligada que não existe")
+    fora = (v.tipo == "Teste") | (v.duplicada_de.fillna("").astype(str) != "") | \
+        v.motivo.fillna("").str.startswith("Relançamento da venda manual")
+    checa(not set(ligadas.id_venda.astype(str)) & set(v.loc[fora, "id_venda"].astype(str)),
+          "atendimentos_padronizados: ligado a venda de teste, duplicada ou relançada (não existe no vulto_corrigido.db)")
     com_cli = a[a.cliente_cpf.astype(str) != ""]
     checa(set(com_cli.cliente_cpf) <= set(cl.cpf), "atendimentos_padronizados: cliente ligado que não está no cadastro")
 

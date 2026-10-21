@@ -10,20 +10,22 @@ O que muda em cada tabela
   loja (Loja física / Site / App), status padronizado (Concluída, Cancelada, Estornada, Chargeback, Aguardando
   pagamento, Sem status), cliente como CPF 000.000.000-00 (ou o e-mail/telefone normalizado), vendedor pelo cadastro.
   Saem os pedidos de teste, as gravações duplicadas e os relançamentos da Batel que casam com a planilha; entram as
-  vendas da planilha manual da Batel (ids novos, depois do último id da Vulto).
+  vendas da planilha manual da Batel (ids novos, depois do último id da Vulto, com BATEL-<Nº> em pedido_externo).
 - itens_venda: SKU do catálogo, preço em reais; os das vendas que saíram também saem; os da planilha da Batel entram.
 - compras: valor em reais (o app gravava centavos), canal pela loja, data em Brasília, cliente normalizado.
 - pontos_mov: o extrato corrigido (créditos ×100 divididos, créditos de vendas que não valem descartados, saldo da
   planilha, resgates anotados só no papel, vencimento e saldo que não fica negativo). A soma por CPF (C + AJ + E − D) é
-  o saldo válido em 01/10/2026.
+  o saldo válido em 01/10/2026, e o saldo acumulado em ordem de data nunca fica negativo (o ajuste entra 1 segundo
+  antes do resgate que passaria do saldo).
 - estoque: a posição oficial em 01/10/2026 (contagem física levada até a virada); as lojas 5 e 6 deixam de ter estoque.
 - entradas_estoque: SKU do catálogo, data AAAA-MM-DD, custo com vírgula, NF repetida conta uma vez e entram os
-  recebimentos que a loja não anotou.
+  recebimentos que a loja não anotou. O envio por transferência (sem quantidade no original) ganha a quantidade
+  escrita no texto, negativa: é saída de quem mandou. Fornecedor com o nome do catálogo.
 - funcionarios: uma conta por pessoa, com a matrícula nova em codigo (VLT-0101), o papel da plataforma em perfil
   (Lojista, Operador, Administrador), o cargo fora do nome e senha vazia (nenhuma senha antiga migra). Não migram a
   conta de teste e o admin desativado; as contas de função (gerente da Batel, CD, estagiário) ficam desativadas até
   a Vulto dizer quem as usa.
-- config: valor_ponto = 0.05.  lojas: sem mudança.
+- config: valor_ponto = 0.05, sem a senha-mestra do TI.  lojas: sem mudança.
 
 Uso: python migracao/banco_corrigido.py   (depois do carregar.py; o carregar.py já chama no final)
 """
@@ -32,6 +34,7 @@ import os
 import re
 import sqlite3
 import sys
+import unicodedata
 from collections import defaultdict
 from datetime import datetime
 from decimal import Decimal
@@ -41,6 +44,7 @@ import pandas as pd
 import batel
 import caminhos
 import produtos
+from estoque_01_10 import quantidade_no_texto
 from padroniza_vendas import cliente, data_local, reais
 
 DESTINO = os.path.join(caminhos.DADOS, "vulto_corrigido.db")
@@ -63,8 +67,20 @@ FUNCIONARIOS = {
     17: ("VLT-0400", "Gerente Batel"), 18: ("VLT-0701", "Operador CD Cajamar"), 19: ("VLT-0001", "Diego"),
     20: ("VLT-0002", "Paula"), 21: ("VLT-0003", "Marina"), 22: None, 23: ("VLT-0105", "Estagiário Pinheiros"), 24: None,
 }
+# Decisão 61: fornecedor das compras pelo nome do catálogo ("MALHARIA SERRA AZUL LTDA", "serra azul" -> Malharia Serra Azul)
+FORNECEDORES = {"serra azul": "Malharia Serra Azul", "rio claro": "Jeans Rio Claro", "r. claro": "Jeans Rio Claro",
+                "pequi": "Atelier Pequi", "aurora": "Confecções Aurora", "horizonte": "Têxtil Horizonte",
+                "ventura": "Acessórios Ventura"}
+ORIGEM_TRANSFERENCIA = {"CD", "Pinheiros", "Eldorado", "Savassi", "Batel"}
 CONTA_DE_FUNCAO = {17, 18, 23}  # desativada até a Vulto informar o nome de quem usa (decisão 58)
 PAPEL = {"vendedor": "Lojista", "gerente": "Lojista", "operador": "Operador", "admin": "Administrador"}  # decisão 57
+
+
+def fornecedor_padrao(nome):
+    if not isinstance(nome, str) or not nome.strip():
+        return None
+    chave = unicodedata.normalize("NFKD", nome).encode("ascii", "ignore").decode().lower()
+    return next((padrao for trecho, padrao in FORNECEDORES.items() if trecho in chave), nome.strip())
 
 
 def valor(texto):
@@ -103,7 +119,9 @@ def tabela_vendas(banco, padrao):
             total, desconto, frete = valores.loc[int(vid), ["total", "desconto", "frete"]]
             compra = None if pd.isna(o.compra_id) else int(o.compra_id)
         contato = r.cliente_cpf or r.cliente_contato or None
-        linhas.append(dict(id=novo_id.get(vid, int(vid) if vid.isdigit() else vid), pedido_externo=r.pedido_externo or None,
+        # venda da planilha manual da Batel: o número da linha (BATEL-<Nº>, decisão 17) fica como referência externa
+        externo = vid if vid in novo_id else r.pedido_externo
+        linhas.append(dict(id=novo_id.get(vid, int(vid) if vid.isdigit() else vid), pedido_externo=externo or None,
                            canal=r.canal, loja_id=int(r.loja_id), cliente_ref=contato, vendedor=r.vendedor or None,
                            total=total, desconto=desconto, frete=frete, status=r.status,
                            criado_em=momento.strftime("%Y-%m-%d %H:%M:%S"), obs=r.obs or None, compra_id=compra))
@@ -179,7 +197,9 @@ def tabela_pontos(banco):
                 if not gastar:
                     break
             if gastar:
-                novas.append(dict(cpf=cpf, tipo="AJ", qtd=gastar, compra_id=None, criado_em=data,
+                # 1 segundo antes do resgate: em ordem de data, o saldo nunca fica negativo (a plataforma não deixa)
+                antes = (pd.Timestamp(data) - pd.Timedelta(seconds=1)).strftime("%Y-%m-%d %H:%M:%S")
+                novas.append(dict(cpf=cpf, tipo="AJ", qtd=gastar, compra_id=None, criado_em=antes,
                                   obs="resgate maior que o saldo: o saldo para em zero (regra do Vulto+)"))
         vencidos = sum(p for d, p in lotes if d < INICIO_VALIDADE)
         if vencidos:
@@ -224,13 +244,19 @@ def tabela_entradas(banco):
     dia = lambda s: next((datetime.strptime(str(s).strip(), f).strftime("%Y-%m-%d")       # noqa: E731
                           for f in ("%d/%m/%Y", "%Y-%m-%d", "%d/%m/%y") if _bate(s, f)), None)
     e["data"] = e.data.map(dia)
-    e["custo_unit"] = e.custo_unit.map(lambda x: reais(valor(x)) if x not in (None, "") else None)
+    # vazio no original continua vazio (o pandas lê como NaN, que viraria o texto "NaN")
+    e["custo_unit"] = e.custo_unit.map(lambda x: reais(valor(x)) if pd.notna(x) and str(x).strip() else None)
     receb = e.qtd.notna() & e.fornecedor.fillna("").str.strip().str.upper().isin(["", "CD"]) & (e.loja_id != 7)
     e.loc[receb, "fornecedor"] = e.loc[receb, "obs"].map(
         lambda o: next((n.title() for n in ("pinheiros", "eldorado", "savassi", "batel") if f"veio da {n}" in str(o).lower()), "CD"))
+    e["fornecedor"] = e.fornecedor.map(fornecedor_padrao)
     compra = (e.loja_id == 7) & e.usuario.isin(["marina.compras", "joao.fiscal"]) & e.nf.notna()
     repetida = compra & e.duplicated(subset=["sku", "qtd", "nf"], keep="first") & compra.where(compra, False)
-    e = e[~repetida]
+    e = e[~repetida].copy()
+    # decisão 30: o envio (do CD ou de uma loja) não tem quantidade, ela está no texto ("2 un -> savassi"); sem número,
+    # 1 peça. O envio é saída de quem mandou, então a quantidade entra negativa, como a devolução nas vendas
+    envio = e.qtd.isna()
+    e.loc[envio, "qtd"] = [-(quantidade_no_texto(str(o or "")) or 1) for o in e.loc[envio, "obs"]]
     h = pd.read_sql("select * from estoque_historico where tipo like 'Recebido%' and (tipo like '%só o envio%' or tipo like '%só o CD%')",
                     banco)
     proximo = int(e.id.max()) + 1
@@ -264,6 +290,7 @@ def main():
     entradas, nf_repetidas, recebimentos = tabela_entradas(banco)
     config = pd.read_sql("select * from config", banco)
     config.loc[config.chave == "valor_ponto", "valor"] = "0.05"                     # 100 pontos = R$ 5,00
+    config = config[config.chave != "senha_master"]                                 # a senha do TI não migra (decisão 58)
     funcionarios = tabela_funcionarios(banco)
     novas = {"vendas": vendas, "itens_venda": itens, "compras": compras, "pontos_mov": pontos, "estoque": estoque,
              "entradas_estoque": entradas, "config": config, "funcionarios": funcionarios}
@@ -321,6 +348,31 @@ def conferir(banco, destino):
     dif = [c for c in set(saldo) | set(valido) if int(saldo.get(c, 0)) != int(valido.get(c, 0))]
     if dif:
         erros.append(f"pontos_mov não fecha com o saldo válido em {len(dif)} CPFs (ex.: {dif[:3]})")
+    acumulado, negativo = defaultdict(int), set()
+    for cpf, tipo, qtd in destino.execute("select cpf, tipo, qtd from pontos_mov order by cpf, criado_em, id"):
+        acumulado[cpf] += -qtd if tipo == "D" else qtd
+        if acumulado[cpf] < 0:
+            negativo.add(cpf)
+    if negativo:
+        erros.append(f"pontos_mov: saldo negativo em algum momento em {len(negativo)} CPFs (ex.: {sorted(negativo)[:3]})")
+    for (tabela,) in destino.execute(f"select name from sqlite_master where type = 'table' and name in ({', '.join('?' * len(ORIGINAIS))})",
+                                     ORIGINAIS).fetchall():
+        for coluna in [c[1] for c in destino.execute(f"pragma table_info({tabela})")]:
+            n = destino.execute(f"select count(*) from {tabela} where lower({coluna}) in ('nan', 'none', 'null')").fetchone()[0]
+            if n:
+                erros.append(f"{tabela}.{coluna}: {n} valores vazios gravados como texto ('NaN', 'None')")
+    conhecidos = {f for (f,) in banco.execute("select distinct fornecedor from produtos_padronizados") if f} | ORIGEM_TRANSFERENCIA
+    outros = {f for (f,) in destino.execute("select distinct fornecedor from entradas_estoque where fornecedor is not null")} - conhecidos
+    if outros:
+        erros.append(f"entradas_estoque: fornecedor fora do catálogo {sorted(outros)[:5]}")
+    sem_qtd = destino.execute("select count(*) from entradas_estoque where qtd is null or qtd = 0").fetchone()[0]
+    if sem_qtd:
+        erros.append(f"entradas_estoque: {sem_qtd} linhas sem quantidade")
+    ultimo_id_vulto = banco.execute("select max(id) from vendas").fetchone()[0]                # ids novos = planilha da Batel
+    sem_numero = destino.execute("select count(*) from vendas where id > ? and coalesce(pedido_externo, '') not like 'BATEL-%'",
+                                 (ultimo_id_vulto,)).fetchone()[0]
+    if sem_numero:
+        erros.append(f"vendas: {sem_numero} vendas da planilha da Batel sem o número BATEL-<Nº>")
     orfaos = destino.execute("select count(*) from itens_venda where venda_id not in (select id from vendas)").fetchone()[0]
     if orfaos:
         erros.append(f"{orfaos} itens sem venda")
@@ -331,6 +383,8 @@ def conferir(banco, destino):
     repetidas = destino.execute("select count(*) from (select codigo from funcionarios group by codigo having count(*) > 1)").fetchone()[0]
     if repetidas or destino.execute("select count(*) from funcionarios where senha is not null").fetchone()[0]:
         erros.append("funcionarios: matrícula repetida ou senha antiga migrada")
+    if destino.execute("select count(*) from config where lower(chave) like '%senha%'").fetchone()[0]:
+        erros.append("config: senha migrada")
     nomes = {n for (n,) in destino.execute("select nome from funcionarios")} | {"Rafael Lima ou Rafaela Couto"}  # decisão 13
     sem_cadastro = {v for (v,) in destino.execute("select distinct vendedor from vendas where vendedor is not null")} - nomes
     if sem_cadastro:
