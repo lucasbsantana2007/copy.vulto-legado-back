@@ -45,7 +45,11 @@ def main():
     telefones = clientes.dropna(subset=["Telefone"]).drop_duplicates("Telefone", keep=False)
     por_tel = dict(zip(telefones["Telefone"].map(digitos), telefones["CPF"]))
     conn = sqlite3.connect(caminhos.PADRONIZADO)
-    vendas = pd.read_sql("select id_venda, pedido_externo, data, loja_id, cliente_cpf from vendas_padronizadas", conn)
+    vendas = pd.read_sql("select id_venda, pedido_externo, data, loja_id, cliente_cpf, tipo, duplicada_de, motivo "
+                         "from vendas_padronizadas", conn)
+    # só as vendas que ficam no banco corrigido: o pedido lançado duas vezes liga à gravação que vale (decisão 10)
+    vendas = vendas[(vendas.tipo != "Teste") & (vendas.duplicada_de.fillna("").astype(str) == "")
+                    & ~vendas.motivo.fillna("").str.startswith("Relançamento da venda manual")]
     vendas["chave"] = [p if p else str(i) for p, i in zip(vendas.pedido_externo, vendas.id_venda)]
     vendas = vendas.drop_duplicates("chave").set_index("chave")
 

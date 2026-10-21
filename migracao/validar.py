@@ -97,6 +97,10 @@ def conferir(t):
     checa(a.id.is_unique, "atendimentos_padronizados: id repetido")
     ligadas = a[a.id_venda.astype(str) != ""]
     checa(set(ligadas.id_venda.astype(str)) <= ids, "atendimentos_padronizados: venda ligada que não existe")
+    fora = (v.tipo == "Teste") | (v.duplicada_de.fillna("").astype(str) != "") | \
+        v.motivo.fillna("").str.startswith("Relançamento da venda manual")
+    checa(not set(ligadas.id_venda.astype(str)) & set(v.loc[fora, "id_venda"].astype(str)),
+          "atendimentos_padronizados: ligado a venda de teste, duplicada ou relançada (não existe no vulto_corrigido.db)")
     com_cli = a[a.cliente_cpf.astype(str) != ""]
     checa(set(com_cli.cliente_cpf) <= set(cl.cpf), "atendimentos_padronizados: cliente ligado que não está no cadastro")
 
