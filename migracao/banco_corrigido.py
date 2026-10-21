@@ -10,7 +10,7 @@ O que muda em cada tabela
   loja (Loja física / Site / App), status padronizado (Concluída, Cancelada, Estornada, Chargeback, Aguardando
   pagamento, Sem status), cliente como CPF 000.000.000-00 (ou o e-mail/telefone normalizado), vendedor pelo cadastro.
   Saem os pedidos de teste, as gravações duplicadas e os relançamentos da Batel que casam com a planilha; entram as
-  vendas da planilha manual da Batel (ids novos, depois do último id da Vulto).
+  vendas da planilha manual da Batel (ids novos, depois do último id da Vulto, com BATEL-<Nº> em pedido_externo).
 - itens_venda: SKU do catálogo, preço em reais; os das vendas que saíram também saem; os da planilha da Batel entram.
 - compras: valor em reais (o app gravava centavos), canal pela loja, data em Brasília, cliente normalizado.
 - pontos_mov: o extrato corrigido (créditos ×100 divididos, créditos de vendas que não valem descartados, saldo da
@@ -119,7 +119,9 @@ def tabela_vendas(banco, padrao):
             total, desconto, frete = valores.loc[int(vid), ["total", "desconto", "frete"]]
             compra = None if pd.isna(o.compra_id) else int(o.compra_id)
         contato = r.cliente_cpf or r.cliente_contato or None
-        linhas.append(dict(id=novo_id.get(vid, int(vid) if vid.isdigit() else vid), pedido_externo=r.pedido_externo or None,
+        # venda da planilha manual da Batel: o número da linha (BATEL-<Nº>, decisão 17) fica como referência externa
+        externo = vid if vid in novo_id else r.pedido_externo
+        linhas.append(dict(id=novo_id.get(vid, int(vid) if vid.isdigit() else vid), pedido_externo=externo or None,
                            canal=r.canal, loja_id=int(r.loja_id), cliente_ref=contato, vendedor=r.vendedor or None,
                            total=total, desconto=desconto, frete=frete, status=r.status,
                            criado_em=momento.strftime("%Y-%m-%d %H:%M:%S"), obs=r.obs or None, compra_id=compra))
@@ -366,6 +368,11 @@ def conferir(banco, destino):
     sem_qtd = destino.execute("select count(*) from entradas_estoque where qtd is null or qtd = 0").fetchone()[0]
     if sem_qtd:
         erros.append(f"entradas_estoque: {sem_qtd} linhas sem quantidade")
+    ultimo_id_vulto = banco.execute("select max(id) from vendas").fetchone()[0]                # ids novos = planilha da Batel
+    sem_numero = destino.execute("select count(*) from vendas where id > ? and coalesce(pedido_externo, '') not like 'BATEL-%'",
+                                 (ultimo_id_vulto,)).fetchone()[0]
+    if sem_numero:
+        erros.append(f"vendas: {sem_numero} vendas da planilha da Batel sem o número BATEL-<Nº>")
     orfaos = destino.execute("select count(*) from itens_venda where venda_id not in (select id from vendas)").fetchone()[0]
     if orfaos:
         erros.append(f"{orfaos} itens sem venda")
