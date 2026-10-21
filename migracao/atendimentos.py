@@ -1,8 +1,9 @@
 """Atendimentos da Vulto (WhatsApp, Instagram e e-mail) ligados ao cliente e à venda certa (decisões 42 e 43).
 
-1. A padronização do export é a dos scripts do Arthur (migracao/padronizacao/atendimento.py): datas, canais,
-   atendentes, contato, assunto em 9 categorias, mensagem do cliente separada da resposta, status pela última
-   resposta e o número do pedido (prefixo limpo, recuperado do texto, inversão de dígitos só em pedido do site/app).
+1. A fonte é o export limpo pelo time (migracao/entrada/atendimentos_export_whatsapp_insta.xlsx, 19/10/2026): datas,
+   canais, atendentes, contato, assunto nas 9 categorias do time, mensagem do cliente separada da resposta, status
+   pela última resposta e o número do pedido. O texto como veio da ferramenta (status, assunto, contato e pedido
+   originais) vem do export original em data/.
 2. Aqui cada atendimento é ligado ao cliente (clientes_padronizados) e à venda (vendas_padronizadas):
    - quem está falando é identificado pelo contato (e-mail ou celular do cadastro); se o contato não identifica
      (ex.: @ do Instagram), vale o cliente da venda citada;
@@ -18,17 +19,26 @@ Uso: python migracao/atendimentos.py   (depois de padroniza_vendas.py e clientes
 import os
 import re
 import sqlite3
-import sys
 from datetime import datetime, timedelta
 
 import pandas as pd
 
 import caminhos
 
-sys.path.append(os.path.join(caminhos.MIGRACAO, "padronizacao"))  # por último: os scripts do time têm prioridade
-import atendimento as padronizacao_arthur  # noqa: E402
-
 CLIENTES = os.path.join(caminhos.SAIDA, "clientes atualizado v2.xlsx")
+LIMPO = os.path.join(caminhos.ENTRADA, "atendimentos_export_whatsapp_insta.xlsx")
+ORIGINAL = os.path.join(caminhos.DADOS, "atendimentos_export_whatsapp_insta.csv")
+
+
+def ler():
+    """Atendimentos limpos pelo time, com o texto original de cada um ao lado (para conferir o que mudou)."""
+    a = pd.read_excel(LIMPO, dtype=str).fillna("")
+    a["data_hora"] = pd.to_datetime(a.data_hora).dt.strftime("%d/%m/%Y %H:%M:%S")
+    original = pd.read_csv(ORIGINAL, sep=";", encoding="latin-1", skiprows=1, dtype=str).fillna("")
+    original = original.drop_duplicates("id").set_index("id")
+    for col in ("status", "assunto", "contato", "pedido"):
+        a[f"{col}_original"] = a.id.map(original[col])
+    return a.rename(columns={"nome_contato": "nome"})
 
 
 def digitos(texto):
@@ -37,8 +47,7 @@ def digitos(texto):
 
 
 def main():
-    dados, reg = padronizacao_arthur.processar(caminhos.DADOS)
-    a = dados["atendimentos"]
+    a = ler()
     clientes = pd.read_excel(CLIENTES, sheet_name="Clientes", dtype=str)
     cadastro = set(clientes["CPF"])
     por_email = {e.lower(): c for e, c in zip(clientes["E-mail"], clientes["CPF"]) if isinstance(e, str) and e}
