@@ -15,7 +15,8 @@ O que muda em cada tabela
 - compras: valor em reais (o app gravava centavos), canal pela loja, data em Brasília, cliente normalizado.
 - pontos_mov: o extrato corrigido (créditos ×100 divididos, créditos de vendas que não valem descartados, saldo da
   planilha, resgates anotados só no papel, vencimento e saldo que não fica negativo). A soma por CPF (C + AJ + E − D) é
-  o saldo válido em 01/10/2026.
+  o saldo válido em 01/10/2026, e o saldo acumulado em ordem de data nunca fica negativo (o ajuste entra 1 segundo
+  antes do resgate que passaria do saldo).
 - estoque: a posição oficial em 01/10/2026 (contagem física levada até a virada); as lojas 5 e 6 deixam de ter estoque.
 - entradas_estoque: SKU do catálogo, data AAAA-MM-DD, custo com vírgula, NF repetida conta uma vez e entram os
   recebimentos que a loja não anotou. O envio por transferência (sem quantidade no original) ganha a quantidade
@@ -181,7 +182,9 @@ def tabela_pontos(banco):
                 if not gastar:
                     break
             if gastar:
-                novas.append(dict(cpf=cpf, tipo="AJ", qtd=gastar, compra_id=None, criado_em=data,
+                # 1 segundo antes do resgate: em ordem de data, o saldo nunca fica negativo (a plataforma não deixa)
+                antes = (pd.Timestamp(data) - pd.Timedelta(seconds=1)).strftime("%Y-%m-%d %H:%M:%S")
+                novas.append(dict(cpf=cpf, tipo="AJ", qtd=gastar, compra_id=None, criado_em=antes,
                                   obs="resgate maior que o saldo: o saldo para em zero (regra do Vulto+)"))
         vencidos = sum(p for d, p in lotes if d < INICIO_VALIDADE)
         if vencidos:
@@ -329,6 +332,13 @@ def conferir(banco, destino):
     dif = [c for c in set(saldo) | set(valido) if int(saldo.get(c, 0)) != int(valido.get(c, 0))]
     if dif:
         erros.append(f"pontos_mov não fecha com o saldo válido em {len(dif)} CPFs (ex.: {dif[:3]})")
+    acumulado, negativo = defaultdict(int), set()
+    for cpf, tipo, qtd in destino.execute("select cpf, tipo, qtd from pontos_mov order by cpf, criado_em, id"):
+        acumulado[cpf] += -qtd if tipo == "D" else qtd
+        if acumulado[cpf] < 0:
+            negativo.add(cpf)
+    if negativo:
+        erros.append(f"pontos_mov: saldo negativo em algum momento em {len(negativo)} CPFs (ex.: {sorted(negativo)[:3]})")
     for (tabela,) in destino.execute(f"select name from sqlite_master where type = 'table' and name in ({', '.join('?' * len(ORIGINAIS))})",
                                      ORIGINAIS).fetchall():
         for coluna in [c[1] for c in destino.execute(f"pragma table_info({tabela})")]:
