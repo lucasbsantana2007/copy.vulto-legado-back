@@ -24,7 +24,7 @@ O que muda em cada tabela
   (Lojista, Operador, Administrador), o cargo fora do nome e senha vazia (nenhuma senha antiga migra). Não migram a
   conta de teste e o admin desativado; as contas de função (gerente da Batel, CD, estagiário) ficam desativadas até
   a Vulto dizer quem as usa.
-- config: valor_ponto = 0.05.  lojas: sem mudança.
+- config: valor_ponto = 0.05, sem a senha-mestra do TI.  lojas: sem mudança.
 
 Uso: python migracao/banco_corrigido.py   (depois do carregar.py; o carregar.py já chama no final)
 """
@@ -271,6 +271,7 @@ def main():
     entradas, nf_repetidas, recebimentos = tabela_entradas(banco)
     config = pd.read_sql("select * from config", banco)
     config.loc[config.chave == "valor_ponto", "valor"] = "0.05"                     # 100 pontos = R$ 5,00
+    config = config[config.chave != "senha_master"]                                 # a senha do TI não migra (decisão 58)
     funcionarios = tabela_funcionarios(banco)
     novas = {"vendas": vendas, "itens_venda": itens, "compras": compras, "pontos_mov": pontos, "estoque": estoque,
              "entradas_estoque": entradas, "config": config, "funcionarios": funcionarios}
@@ -347,6 +348,8 @@ def conferir(banco, destino):
     repetidas = destino.execute("select count(*) from (select codigo from funcionarios group by codigo having count(*) > 1)").fetchone()[0]
     if repetidas or destino.execute("select count(*) from funcionarios where senha is not null").fetchone()[0]:
         erros.append("funcionarios: matrícula repetida ou senha antiga migrada")
+    if destino.execute("select count(*) from config where lower(chave) like '%senha%'").fetchone()[0]:
+        erros.append("config: senha migrada")
     nomes = {n for (n,) in destino.execute("select nome from funcionarios")} | {"Rafael Lima ou Rafaela Couto"}  # decisão 13
     sem_cadastro = {v for (v,) in destino.execute("select distinct vendedor from vendas where vendedor is not null")} - nomes
     if sem_cadastro:
