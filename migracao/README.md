@@ -8,7 +8,7 @@ Tudo o que o time limpou e decidiu sobre os dados da Vulto, carregado no `data/v
 |---|---|---|---|
 | Faturamento jan/25–set/26 | R$ 94.580.496,26 (`/relatorio/faturamento`) | **R$ 6.498.071,30** (frete incluído, decisão 4) | Centavos do app (−R$ 87,5 mi), cancelados e não pagos, testes, duplicados, trocas, Batel (decisões 1 e 9 a 17) |
 | Estoque em 01/10/2026 | 46.302 peças (tabela `estoque`) | **15.216 peças** (Savassi oficial por modelo: 2.105) | Lojas 5 e 6 copiam o CD, transferências nunca baixadas, saldos negativos (decisões 27 a 37) |
-| Passivo de pontos em 01/10/2026 | 8.829.352 pontos | **3.373.251 pontos = R$ 168.662,55** | Créditos ×100 do app, compras canceladas, trocas, resgates anotados só na planilha, vencimento de 12 meses (decisões 18 a 26 e 47 a 50). Em aberto: dobro online (+R$ 31.581,85) e pontos da Batel (+R$ 543,55), decisões 40 e 41 |
+| Passivo de pontos em 01/10/2026 | 8.829.352 pontos | **4.015.759 pontos = R$ 200.787,95** | Créditos ×100 do app, compras canceladas, trocas, resgates anotados só na planilha, vencimento de 12 meses (decisões 18 a 26 e 47 a 50); entram o dobro que faltou nas compras online (+R$ 31.581,85) e os pontos das vendas manuais da Batel (+R$ 543,55), decisões 40 e 41 |
 
 Os detalhes de cada número estão nas consultas 3, 5, 8 e 11 do `consultas.sql`.
 

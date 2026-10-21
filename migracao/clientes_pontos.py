@@ -18,6 +18,8 @@ Regras (decididas pelo time em 15/10/2026 e na limpeza de 19/10/2026):
 - aceita_msg: Sim só com Sim registrado; Não ou Não informado é Não.
 - Validade: só valem os pontos ganhos nos últimos 12 meses (de 01/10/2025 a 01/10/2026). Os resgates
   gastam primeiro os pontos mais antigos.
+- Compra no site e no app vale pontos em dobro: o dobro que o sistema não deu é creditado na data da compra
+  (decisão 40). Venda manual da Batel com CPF ganha 1 ponto por real, na data da venda (decisão 41).
 - Categoria pelo saldo válido em 01/10/2026: 0 sem categoria, 1 a 1.500 Bronze, 1.501 a 5.000 Prata,
   5.001 a 9.999 Ouro, 10.000 ou mais Vip.
 
@@ -444,15 +446,18 @@ def escrever(clientes, extrato, invalidos, pendentes, resumo, decisoes):
     wb.save(SAIDA)
 
 
-def pendencias(clientes, extrato, por_cliente, reais):
-    """Impacto das decisões ainda em aberto (40 e 41), sem aplicar: quanto o passivo oficial subiria."""
+def creditos_que_faltavam(extrato):
+    """Pontos que a regra do Vulto+ manda dar e o sistema não deu (decisões 40 e 41):
+    - 40: compra no site ou no app creditada uma vez só (o código só dobrava se o canal fosse exatamente "site" ou
+      "app"): entra o dobro que faltou, na data da compra;
+    - 41: venda manual da Batel com CPF, concluída e não lançada no Vulto+: 1 ponto por real, na data da venda.
+    Devolve os dois créditos e o nome anotado na planilha da Batel para cada CPF."""
     legado = sqlite3.connect(LEGADO)
     compras = pd.read_sql("select id, valor, origem from compras", legado).set_index("id")
     vendas = pd.read_sql("select id, compra_id, total, canal from vendas", legado).dropna(subset=["compra_id"])
     centavos = {int(c) for c, t, canal in zip(vendas.compra_id, vendas.total, vendas.canal)
                 if str(canal).strip().lower() in ("app", "online") and re.fullmatch(r"-?\d+", str(t).strip())}
 
-    # 40: compra no site/app creditada uma vez só (o código só dobrava se o canal fosse exatamente "site" ou "app")
     dobro = []
     for e in extrato:
         m = re.match(r"compra (\d+)", e["ref"])
@@ -463,31 +468,18 @@ def pendencias(clientes, extrato, por_cliente, reais):
             continue
         valor = float(str(c.valor).replace(",", ".")) / (100 if int(m.group(1)) in centavos else 1)
         if valor >= 1 and 0.8 <= e["considerado"] / valor <= 1.2:
-            dobro.append(dict(e, tipo="Crédito (dobro online)", original=0, situacao="Pendente"))
+            dobro.append(dict(e, tipo="Crédito (dobro online)", original=0, situacao="Corrigido", origem=f"dobro de {e['origem']}",
+                              motivo="Compra no site ou no app creditada com pontos simples: o dobro que faltou (decisão 40)"))
 
-    # 41: venda manual da Batel com CPF, concluída e não lançada no Vulto+
     import batel
     planilha, _ = batel.ler()
+    vendas_batel = [r for r in planilha.itertuples() if r.cpf and r.Status == "Concluída" and r[13] == "Não"]
     batel_pts = [dict(cpf=r.cpf, quando=datetime.combine(r.momento.date(), datetime.min.time(), tzinfo=BRASILIA),
-                      tipo="Crédito (venda manual Batel)", original=0, considerado=int(round(r.valor)), situacao="Pendente",
-                      motivo="", origem=f"planilha Batel Nº {r.numero}", ref="")
-                 for r in planilha.itertuples() if r.cpf and r.Status == "Concluída" and r[13] == "Não"]
-
-    def valido_com(extra):
-        mais = defaultdict(list)
-        for e in extra:
-            mais[e["cpf"]].append(e)
-        return sum(saldo_em(por_cliente.get(cpf, []) + mais.get(cpf, []))[1] - c["valido"]
-                   for cpf, c in clientes.items() if cpf in mais) + sum(
-            saldo_em(mais[cpf])[1] for cpf in mais if cpf not in clientes)
-
-    d, b = valido_com(dobro), valido_com(batel_pts)
-    return [
-        [],
-        ["Decisões em aberto (não aplicadas no passivo oficial)", "Pontos a mais no passivo", "R$"],
-        [f"40. Dobro online não creditado ({len(dobro)} compras; {sum(e['considerado'] for e in dobro)} pontos no total)", d, reais(d)],
-        [f"41. Vendas manuais da Batel sem pontos ({len(batel_pts)} vendas com CPF)", b, reais(b)],
-    ]
+                      tipo="Crédito (venda manual Batel)", original=0, considerado=int(round(r.valor)), situacao="Corrigido",
+                      motivo="Venda manual da Batel sem pontos: 1 ponto por real na data da venda (decisão 41)",
+                      origem=f"planilha Batel Nº {r.numero}", ref=f"venda BATEL-{r.numero}") for r in vendas_batel]
+    nomes = {r.cpf: texto(r.Cliente) for r in vendas_batel if texto(r.Cliente) and texto(r.Cliente) != "Outros"}
+    return dobro, batel_pts, nomes
 
 
 REGRAS = [
@@ -524,13 +516,18 @@ REGRAS = [
 def main():
     clientes, invalidos, recuperados = montar_clientes()
     extrato, movimentos, bug_corrigido = montar_extrato(clientes)
+    dobro, batel_pts, nomes_batel = creditos_que_faltavam(extrato)
+    extrato += dobro + batel_pts
 
-    # Quem tem pontos no sistema mas não está na planilha de clientes também é credor
+    # Quem tem pontos no sistema (ou na planilha da Batel) mas não está na planilha de clientes também é credor
     so_no_sistema = {e["cpf"] for e in extrato} - set(clientes)
+    so_batel = so_no_sistema - {e["cpf"] for e in extrato if e["origem"].startswith("vulto.db")}
     for cpf in so_no_sistema:
-        clientes[cpf] = dict(cpf=cpf, nome="(sem cadastro na planilha)", email="", telefone="", cadastro=None, loja="", aceita="Não",
-                             fundidos=0, pontos_planilha=0, categoria_planilha="", linhas="",
-                             origem="Só no sistema de pontos (vulto.db)" + ("" if cpf_valido(cpf) else " · CPF inválido"), obs="")
+        clientes[cpf] = dict(cpf=cpf, nome=nomes_batel.get(cpf, "(sem cadastro na planilha)"), email="", telefone="", cadastro=None,
+                             loja="Batel" if cpf in so_batel else "", aceita="Não", fundidos=0, pontos_planilha=0,
+                             categoria_planilha="", linhas="",
+                             origem=("Só na planilha manual da Batel (venda sem sistema)" if cpf in so_batel
+                                     else "Só no sistema de pontos (vulto.db)") + ("" if cpf_valido(cpf) else " · CPF inválido"), obs="")
     novos, pendentes, contagem_resgates = resgates_da_planilha(clientes, extrato)
     extrato += novos
 
@@ -577,6 +574,8 @@ def main():
         ["Créditos de pedidos lançados duas vezes", efeito("Descartado", "duas vezes"), ""],
         ["Créditos de vendas de teste", efeito("Descartado", "teste"), ""],
         ["Créditos de trocas (a compra original já ganhou os pontos)", efeito("Descartado", "Troca"), ""],
+        ["Dobro que faltava nas compras do site e do app (decisão 40)", efeito("Corrigido", "decisão 40"), ""],
+        ["Pontos das vendas manuais da Batel (decisão 41)", efeito("Corrigido", "decisão 41"), ""],
         ["Resgates anotados só na planilha", sum(e["considerado"] for e in novos), ""],
         ["Resgates maiores que o saldo (o sistema deixava; o saldo para em zero)", faltou_total, ""],
         ["= Saldo sem vencimento", total, reais(total)],
@@ -589,7 +588,8 @@ def main():
         ["Clientes"],
         ["Clientes no cadastro (um por CPF, depois da fusão)", len(clientes) - len(so_no_sistema), ""],
         ["dos quais estavam fora do 'clientes atualizado' (80 com o zero da frente cortado + 5 CPFs corrigidos)", recuperados, ""],
-        ["Só no sistema de pontos, sem cadastro na planilha", len(so_no_sistema), ""],
+        ["Só no sistema de pontos, sem cadastro na planilha", len(so_no_sistema - so_batel), ""],
+        ["Só na planilha manual da Batel, sem cadastro (decisão 41)", len(so_batel), ""],
         ["Clientes com CPF inválido (ficam, marcados na coluna Origem)", sum(not cpf_valido(c) for c in clientes), ""],
         ["  saldo válido deles (incluído no passivo oficial)", sum(c["valido"] for cpf, c in clientes.items() if not cpf_valido(cpf)),
          reais(sum(c["valido"] for cpf, c in clientes.items() if not cpf_valido(cpf)))],
@@ -600,7 +600,6 @@ def main():
         *[[k, v, ""] for k, v in contagem_resgates.items()],
     ]
 
-    resumo += pendencias(clientes, extrato, por_cliente, reais)
     decisoes = registro.decisoes(18, 26) + registro.decisoes(40, 41) + registro.decisoes(47, 53)
     escrever(clientes, extrato, invalidos, pendentes, resumo, decisoes)
 
@@ -608,7 +607,7 @@ def main():
     print(f"passivo oficial: {valido} pontos = R$ {reais(valido)} | sem vencimento: {total} = R$ {reais(total)} | vencidos {vencidos}")
     print(f"sistema como está: {sistema} | categorias: {dict(qtd_categoria)}")
     print("resumo:")
-    for linha in resumo[8:22]:
+    for linha in resumo[8:24]:
         print("  ", linha)
     print("resgates:", dict(contagem_resgates), "| gravado:", SAIDA)
 
