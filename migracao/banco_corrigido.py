@@ -58,8 +58,8 @@ VENCIMENTO = "2026-09-30 23:59:59"
 LOJA_DO_LOCAL = {"Pinheiros": 1, "Eldorado": 2, "Savassi": 3, "Batel": 4, "CD Cajamar": 7}
 TIPO_PONTO = {"Crédito": "C", "Resgate": "D", "Estorno": "E", "Ajuste": "AJ", "Saldo da planilha": "AJ",
               "Resgate (só na planilha)": "D", "Crédito (dobro online)": "C", "Crédito (venda manual Batel)": "C"}
-# Decisões 56 a 59: matrícula nova por pessoa. A chave é o id do vulto.db (o crachá 0102 era de duas pessoas); o nome
-# só aparece quando muda (as vendas continuam ligadas pelo nome). None = não migra (decisão 58).
+# Decisões 57 a 60: matrícula nova por pessoa. A chave é o id do vulto.db (o crachá 0102 era de duas pessoas); o nome
+# só aparece quando muda (as vendas continuam ligadas pelo nome). None = não migra (decisão 59).
 FUNCIONARIOS = {
     1: ("VLT-0101", None), 2: ("VLT-0102", None), 3: ("VLT-0104", None), 4: ("VLT-0103", None),
     5: ("VLT-0100", None), 6: ("VLT-0201", None), 7: ("VLT-0202", None), 8: ("VLT-0203", None),
@@ -68,13 +68,13 @@ FUNCIONARIOS = {
     17: ("VLT-0400", "Gerente Batel"), 18: ("VLT-0701", "Operador CD Cajamar"), 19: ("VLT-0001", "Diego"),
     20: ("VLT-0002", "Paula"), 21: ("VLT-0003", "Marina"), 22: None, 23: ("VLT-0105", "Estagiário Pinheiros"), 24: None,
 }
-# Decisão 61: fornecedor das compras pelo nome do catálogo ("MALHARIA SERRA AZUL LTDA", "serra azul" -> Malharia Serra Azul)
+# Decisão 62: fornecedor das compras pelo nome do catálogo ("MALHARIA SERRA AZUL LTDA", "serra azul" -> Malharia Serra Azul)
 FORNECEDORES = {"serra azul": "Malharia Serra Azul", "rio claro": "Jeans Rio Claro", "r. claro": "Jeans Rio Claro",
                 "pequi": "Atelier Pequi", "aurora": "Confecções Aurora", "horizonte": "Têxtil Horizonte",
                 "ventura": "Acessórios Ventura"}
 ORIGEM_TRANSFERENCIA = {"CD", "Pinheiros", "Eldorado", "Savassi", "Batel"}
-CONTA_DE_FUNCAO = {17, 18, 23}  # desativada até a Vulto informar o nome de quem usa (decisão 58)
-PAPEL = {"vendedor": "Lojista", "gerente": "Lojista", "operador": "Operador", "admin": "Administrador"}  # decisão 57
+CONTA_DE_FUNCAO = {17, 18, 23}  # desativada até a Vulto informar o nome de quem usa (decisão 59)
+PAPEL = {"vendedor": "Lojista", "gerente": "Lojista", "operador": "Operador", "admin": "Administrador"}  # decisão 58
 
 
 def fornecedor_padrao(nome):
@@ -222,7 +222,7 @@ def tabela_pontos(banco):
 
 
 def tabela_funcionarios(banco):
-    """Uma conta por pessoa com a matrícula nova e o papel da plataforma; nenhuma senha antiga migra (decisões 56 a 59)."""
+    """Uma conta por pessoa com a matrícula nova e o papel da plataforma; nenhuma senha antiga migra (decisões 57 a 60)."""
     f = pd.read_sql("select * from funcionarios", banco)
     if set(f.id) != set(FUNCIONARIOS):
         sys.exit(f"funcionarios: ids sem matrícula definida em FUNCIONARIOS: {sorted(set(f.id) ^ set(FUNCIONARIOS))}")
@@ -297,7 +297,7 @@ def main():
     entradas, nf_repetidas, recebimentos = tabela_entradas(banco)
     config = pd.read_sql("select * from config", banco)
     config.loc[config.chave == "valor_ponto", "valor"] = "0.05"                     # 100 pontos = R$ 5,00
-    config = config[config.chave != "senha_master"]                                 # a senha do TI não migra (decisão 58)
+    config = config[config.chave != "senha_master"]                                 # a senha do TI não migra (decisão 59)
     funcionarios = tabela_funcionarios(banco)
     novas = {"vendas": vendas, "itens_venda": itens, "compras": compras, "pontos_mov": pontos, "estoque": estoque,
              "entradas_estoque": entradas, "config": config, "funcionarios": funcionarios}

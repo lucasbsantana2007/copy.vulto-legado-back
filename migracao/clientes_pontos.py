@@ -55,7 +55,7 @@ INICIO_VALIDADE = datetime(2025, 10, 1, tzinfo=BRASILIA)
 CONGELAMENTO = datetime(2025, 1, 1, tzinfo=BRASILIA)  # a coluna Pontos da planilha foi congelada aqui
 VALOR_PONTO = 0.05  # 100 pontos = R$ 5 (regra desde mar/2025)
 FAIXAS = ((10000, "Vip"), (5001, "Ouro"), (1501, "Prata"), (1, "Bronze"), (0, "Sem categoria"))
-DOMINIOS = {"gmial.com": "gmail.com", "hotmail.con": "hotmail.com", "uol.con.br": "uol.com.br"}  # decisão 60
+DOMINIOS = {"gmial.com": "gmail.com", "hotmail.con": "hotmail.com", "uol.con.br": "uol.com.br"}  # decisão 61
 
 LOJAS = {
     "site": "Site", "ecommerce": "Site", "app": "App", "pinheiros": "Pinheiros", "eldorado": "Eldorado",
@@ -153,7 +153,7 @@ def sem_acento(texto: str) -> str:
 
 
 def email_sem_erro(email: str) -> str:
-    """Domínio digitado errado (decisão 60): 'ana@gmial.com' -> 'ana@gmail.com'."""
+    """Domínio digitado errado (decisão 61): 'ana@gmial.com' -> 'ana@gmail.com'."""
     usuario, _, dominio = email.rpartition("@")
     return f"{usuario}@{DOMINIOS[dominio]}" if dominio in DOMINIOS else email
 
