@@ -14,7 +14,8 @@ O que muda em cada tabela
 - itens_venda: SKU do catálogo, preço em reais; os das vendas que saíram também saem; os da planilha da Batel entram.
 - compras: valor em reais (o app gravava centavos), canal pela loja, data em Brasília, cliente normalizado.
 - pontos_mov: o extrato corrigido (créditos ×100 divididos, créditos de vendas que não valem descartados, saldo da
-  planilha, resgates anotados só no papel, vencimento e saldo que não fica negativo). A soma por CPF (C + AJ + E − D) é
+  planilha, resgates anotados só no papel, o dobro que faltou nas compras online e os pontos das vendas manuais da
+  Batel, vencimento e saldo que não fica negativo). A soma por CPF (C + AJ + E − D) é
   o saldo válido em 01/10/2026, e o saldo acumulado em ordem de data nunca fica negativo (o ajuste entra 1 segundo
   antes do resgate que passaria do saldo).
 - estoque: a posição oficial em 01/10/2026 (contagem física levada até a virada); as lojas 5 e 6 deixam de ter estoque.
@@ -56,7 +57,7 @@ INICIO_VALIDADE = "2025-10-01 00:00:00"
 VENCIMENTO = "2026-09-30 23:59:59"
 LOJA_DO_LOCAL = {"Pinheiros": 1, "Eldorado": 2, "Savassi": 3, "Batel": 4, "CD Cajamar": 7}
 TIPO_PONTO = {"Crédito": "C", "Resgate": "D", "Estorno": "E", "Ajuste": "AJ", "Saldo da planilha": "AJ",
-              "Resgate (só na planilha)": "D"}
+              "Resgate (só na planilha)": "D", "Crédito (dobro online)": "C", "Crédito (venda manual Batel)": "C"}
 # Decisões 56 a 59: matrícula nova por pessoa. A chave é o id do vulto.db (o crachá 0102 era de duas pessoas); o nome
 # só aparece quando muda (as vendas continuam ligadas pelo nome). None = não migra (decisão 58).
 FUNCIONARIOS = {
@@ -177,6 +178,12 @@ def tabela_pontos(banco):
         elif r.tipo == "Saldo da planilha":
             novas.append(dict(cpf=r.cpf, tipo="AJ", qtd=qtd, compra_id=None, criado_em=r.data,
                               obs="saldo da planilha Vulto+ congelado em 01/01/2025 (decisão 19)"))
+        elif r.tipo == "Crédito (dobro online)":
+            novas.append(dict(cpf=r.cpf, tipo="C", qtd=qtd, compra_id=compra, criado_em=r.data,
+                              obs="dobro da compra online que o sistema não creditou (decisão 40)"))
+        elif r.tipo == "Crédito (venda manual Batel)":
+            novas.append(dict(cpf=r.cpf, tipo="C", qtd=qtd, compra_id=None, criado_em=r.data,
+                              obs=f"venda manual da Batel {str(r.compra_venda).replace('venda ', '')} (decisão 41)"))
         else:
             novas.append(dict(cpf=r.cpf, tipo=tipo, qtd=qtd, compra_id=None, criado_em=r.data,
                               obs=f"resgate anotado só no papel: {r.origem} (decisão 25)"))
