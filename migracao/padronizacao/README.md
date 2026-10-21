@@ -2,8 +2,8 @@
 
 > **Os números oficiais saem do `migracao/carregar.py`** (ver `migracao/README.md` e `migracao/registro_decisoes.md`).
 > Esta pasta guarda os scripts do Arthur, que limpam as planilhas e o `vulto.db`, com o histórico dos commits (a versão
-> dele e as correções de 19/10). O `carregar.py` usa daqui o leitor de códigos (`comum.py`) e a padronização do
-> atendimento (`atendimento.py`). O resto é uma versão paralela: algumas regras foram trocadas pelo time em 15/10 e 19/10
+> dele e as correções de 19/10). O `carregar.py` usa daqui só o leitor de códigos (`comum.py`); o atendimento
+> passou a vir do export limpo pelo time (`migracao/entrada`). O resto é uma versão paralela: algumas regras foram trocadas pelo time em 15/10 e 19/10
 > (frete é receita, categoria com Vip pelo saldo, tamanho em número no SKU de calça e bermuda, vírgula decimal,
 > validade de 12 meses para todos), então os números desta pasta não são os oficiais. A numeração das decisões daqui
 > também é própria (não é a do `registro_decisoes.md`).

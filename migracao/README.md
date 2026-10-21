@@ -7,7 +7,7 @@ Tudo o que o time limpou e decidiu sobre os dados da Vulto, carregado no `data/v
 | Número | Sistema da Vulto | Nosso número | De onde vem a diferença |
 |---|---|---|---|
 | Faturamento jan/25–set/26 | R$ 94.580.496,26 (`/relatorio/faturamento`) | **R$ 6.498.071,30** (frete incluído, decisão 4) | Centavos do app (−R$ 87,5 mi), cancelados e não pagos, testes, duplicados, trocas, Batel (decisões 1 e 9 a 17) |
-| Estoque em 01/10/2026 | 46.302 peças (tabela `estoque`) | **15.216 peças** (Savassi oficial por modelo: 2.105) | Lojas 5 e 6 copiam o CD, transferências nunca baixadas, saldos negativos (decisões 27 a 37) |
+| Estoque em 01/10/2026 | 46.302 peças (tabela `estoque`) | **15.033 peças** vendáveis (Savassi oficial por modelo: 2.040) | Lojas 5 e 6 copiam o CD, transferências nunca baixadas, saldos negativos; avaria contada na Pinheiros e estimada nas outras lojas (decisões 27 a 37 e 54) |
 | Passivo de pontos em 01/10/2026 | 8.829.352 pontos | **3.373.251 pontos = R$ 168.662,55** | Créditos ×100 do app, compras canceladas, trocas, resgates anotados só na planilha, vencimento de 12 meses (decisões 18 a 26 e 47 a 50). Em aberto: dobro online (+R$ 31.581,85) e pontos da Batel (+R$ 543,55), decisões 40 e 41 |
 
 Os detalhes de cada número estão nas consultas 3, 5, 8 e 11 do `consultas.sql`.
@@ -54,7 +54,7 @@ Para conferir o banco como está: `python migracao/validar.py`.
 
 ## Pastas
 
-- `migracao/entrada/` — planilhas que o time limpou à mão. **É aqui que se edita.**
+- `migracao/entrada/` — planilhas que o time limpou à mão (catálogo, clientes e fidelidade, contagem com a avaria estimada, vendas manuais da Batel e o export de atendimento). **É aqui que se edita.** A pasta `data/` guarda os arquivos como a Vulto entregou: nunca mudam, porque são o "antes" da comparação.
   A `clientes_fidelidade_FINAL_v3 (1).xlsx` é a planilha do Vulto+ limpa em 19/10/2026: um cliente por CPF, a aba
   Resgates com o CPF de cada resgate identificado, a aba Pendências (o que falta confirmar com as lojas) e o
   "Relatório de Mudanças". É a fonte dos clientes e dos pontos do `clientes_pontos.py`. Para resolver um resgate
@@ -69,7 +69,7 @@ Para conferir o banco como está: `python migracao/validar.py`.
 - `migracao/consultas.sql` — consultas prontas para ver os resultados no banco (pendências, faturamento por mês, passivo, estoque).
 - `migracao/registro_decisoes.md` — o registro de decisões, no formato do brief. Toda decisão nova entra aqui (as abas Decisões das planilhas geradas são lidas daqui).
 - `migracao/padronizacao/` — os scripts do Arthur que limpam as planilhas e o vulto.db (com o histórico dos commits).
-  O `carregar.py` usa o leitor de códigos (`comum.py`) e a padronização do atendimento (`atendimento.py`); o resto da
+  O `carregar.py` usa daqui só o leitor de códigos (`comum.py`); o resto da
   pasta é uma versão paralela, com regras que o time trocou em 15/10 e 19/10 (frete, categoria, tamanho no SKU): fica
   como referência e **não** é a fonte dos números oficiais.
 - `migracao/saida/` — o que os scripts geram para conferir no Excel (`clientes atualizado v2.xlsx`, `estoque_vulto_01-10-2026.xlsx`, `vendas_padronizadas.csv`, o log de cada valor alterado e o gráfico das faixas de valor de compra). Não edite aqui: é sobrescrito a cada rodada.
