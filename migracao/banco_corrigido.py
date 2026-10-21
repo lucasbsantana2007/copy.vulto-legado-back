@@ -18,7 +18,8 @@ O que muda em cada tabela
   o saldo válido em 01/10/2026.
 - estoque: a posição oficial em 01/10/2026 (contagem física levada até a virada); as lojas 5 e 6 deixam de ter estoque.
 - entradas_estoque: SKU do catálogo, data AAAA-MM-DD, custo com vírgula, NF repetida conta uma vez e entram os
-  recebimentos que a loja não anotou.
+  recebimentos que a loja não anotou. O envio por transferência (sem quantidade no original) ganha a quantidade
+  escrita no texto, negativa: é saída de quem mandou.
 - funcionarios: uma conta por pessoa, com a matrícula nova em codigo (VLT-0101), o papel da plataforma em perfil
   (Lojista, Operador, Administrador), o cargo fora do nome e senha vazia (nenhuma senha antiga migra). Não migram a
   conta de teste e o admin desativado; as contas de função (gerente da Batel, CD, estagiário) ficam desativadas até
@@ -41,6 +42,7 @@ import pandas as pd
 import batel
 import caminhos
 import produtos
+from estoque_01_10 import quantidade_no_texto
 from padroniza_vendas import cliente, data_local, reais
 
 DESTINO = os.path.join(caminhos.DADOS, "vulto_corrigido.db")
@@ -231,7 +233,11 @@ def tabela_entradas(banco):
         lambda o: next((n.title() for n in ("pinheiros", "eldorado", "savassi", "batel") if f"veio da {n}" in str(o).lower()), "CD"))
     compra = (e.loja_id == 7) & e.usuario.isin(["marina.compras", "joao.fiscal"]) & e.nf.notna()
     repetida = compra & e.duplicated(subset=["sku", "qtd", "nf"], keep="first") & compra.where(compra, False)
-    e = e[~repetida]
+    e = e[~repetida].copy()
+    # decisão 30: o envio (do CD ou de uma loja) não tem quantidade, ela está no texto ("2 un -> savassi"); sem número,
+    # 1 peça. O envio é saída de quem mandou, então a quantidade entra negativa, como a devolução nas vendas
+    envio = e.qtd.isna()
+    e.loc[envio, "qtd"] = [-(quantidade_no_texto(str(o or "")) or 1) for o in e.loc[envio, "obs"]]
     h = pd.read_sql("select * from estoque_historico where tipo like 'Recebido%' and (tipo like '%só o envio%' or tipo like '%só o CD%')",
                     banco)
     proximo = int(e.id.max()) + 1
@@ -328,6 +334,9 @@ def conferir(banco, destino):
             n = destino.execute(f"select count(*) from {tabela} where lower({coluna}) in ('nan', 'none', 'null')").fetchone()[0]
             if n:
                 erros.append(f"{tabela}.{coluna}: {n} valores vazios gravados como texto ('NaN', 'None')")
+    sem_qtd = destino.execute("select count(*) from entradas_estoque where qtd is null or qtd = 0").fetchone()[0]
+    if sem_qtd:
+        erros.append(f"entradas_estoque: {sem_qtd} linhas sem quantidade")
     orfaos = destino.execute("select count(*) from itens_venda where venda_id not in (select id from vendas)").fetchone()[0]
     if orfaos:
         erros.append(f"{orfaos} itens sem venda")
