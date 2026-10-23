@@ -1,6 +1,7 @@
 # Registro de decisões — migração Vulto
 
 Cada problema encontrado nos dados ou nas regras da Vulto, o que decidimos e quanto isso muda nos números.
+As decisões 66 a 80 (a união com a plataforma da Casa Lorenzi: pendências das planilhas, catálogo, status das vendas e regras do Vulto+) continuam em `casalorenzi-backend/docs/registro_decisoes_uniao.md`, no mesmo formato; na carga, as duas listas entram juntas na tabela `decisoes_migracao` da plataforma.
 Tipo da decisão: **automático** (óbvio, sem conflito), **padrão assumido** (barato de errar, fácil de desfazer) ou **negócio** (custa caro ou não dá para desfazer; decidido pelo time com a diretoria).
 
 Impactos das decisões 1 a 14 calculados sobre a base bruta de vendas (todas as 18.598 linhas); os das decisões 15 a 45, sobre o período jan/2025 a set/2026, já com os filtros de status, testes e duplicados.
